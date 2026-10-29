@@ -1,0 +1,22 @@
+Datasets and teaching materials in this repository
+(everything under comsol_datasets/data/, comsol_datasets/logs/, the text and figures of the
+notebooks and the documentation) are licensed under the
+
+    Creative Commons Attribution 4.0 International License (CC BY 4.0)
+    https://creativecommons.org/licenses/by/4.0/
+    Legal code: https://creativecommons.org/licenses/by/4.0/legalcode
+
+Copyright (c) 2026 Jan Zemen, Czech Technical University in Prague, Faculty of Electrical Engineering
+
+You are free to share and adapt the material for any purpose, provided you give appropriate
+credit, provide a link to the license, and indicate if changes were made.
+
+Suggested citation:
+    J. Zemen, "COMSOL semiconductor device datasets for DNN training (pn diode, solar cell, MOSFET)",
+    CTU in Prague, 2026, https://github.com/zemenja1/ppsr-ai-svs
+
+Source code (scripts, code cells of the notebooks) is licensed under the MIT License, see LICENSE.
+
+The datasets were computed with COMSOL Multiphysics(R) 6.3 and the Semiconductor Module, starting from
+models of the COMSOL Application Library. COMSOL and COMSOL Multiphysics are trademarks of COMSOL AB.
+The COMSOL model files themselves are not distributed here.
