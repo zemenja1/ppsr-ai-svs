@@ -26,6 +26,7 @@ notebooks/         Google Colab notebooks (notebooks/src: the same notebooks as 
 | Notebook | Content | |
 |---|---|---|
 | `01_pn_diode.ipynb` | pn diode: physics, DEVSIM simulation, DNN surrogate trained on COMSOL and DEVSIM data | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/zemenja1/ppsr-ai-svs/blob/main/notebooks/01_pn_diode.ipynb) |
+| `02_mosfet.ipynb` | MOSFET: physics, threshold voltage and square-law model, DNN for one transistor (tier 1) and for many designs (tier 2), physics checks | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/zemenja1/ppsr-ai-svs/blob/main/notebooks/02_mosfet.ipynb) |
 
 See [comsol_datasets/README.md](comsol_datasets/README.md) for the description of all datasets.
 
