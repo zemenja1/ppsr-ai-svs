@@ -24,12 +24,21 @@ cat <<'EOF'
   public static Model run() {
     Model m;
     try { m = ModelUtil.load("m", BASE); } catch (java.io.IOException e) { throw new RuntimeException(e); }
+    // Require a small residual as well: with the default criterion COMSOL can accept a stalled Newton
+    // iteration (tiny solution update, large residual) and return a wrong current without any warning.
+    for (String sol : m.sol().tags())
+      for (String f : m.sol(sol).feature().tags())
+        for (String sub : m.sol(sol).feature(f).feature().tags())
+          if (m.sol(sol).feature(f).feature(sub).getType().equals("FullyCoupled"))
+            m.sol(sol).feature(f).feature(sub).set("termonres", "on");
     String gph = m.component("comp1").variable("var1").get("G_ph");
     StudyFeature s = m.study("std1").feature("stat");
     s.set("useparam", true);
     s.set("pname", new String[]{"V0"}); s.set("punit", new String[]{"V"});
     s.set("plistarr", new String[]{VLIST});
     s.set("pcontinuation", "V0");
+    m.component("comp1").physics("semi").feature("tar1").set("taun_mat", "userdef");   // default: lifetime from the Si material
+    m.component("comp1").physics("semi").feature("tar1").set("taup_mat", "userdef");
     NumericalFeature g = m.result().numerical().create("evJV", "EvalGlobal");
     g.set("data", "dset1");
     g.set("expr", new String[]{"V0", "semi.I0_1"});

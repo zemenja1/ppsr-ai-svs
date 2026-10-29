@@ -37,10 +37,21 @@ cat <<'EOF'
   public static Model run() {
     Model m;
     try { m = ModelUtil.load("m", BASE); } catch (java.io.IOException e) { throw new RuntimeException(e); }
+    // Require a small residual as well: with the default criterion COMSOL can accept a stalled Newton
+    // iteration (tiny solution update, large residual) and return a wrong current without any warning.
+    for (String sol : m.sol().tags())
+      for (String f : m.sol(sol).feature().tags())
+        for (String sub : m.sol(sol).feature(f).feature().tags())
+          if (m.sol(sol).feature(f).feature(sub).getType().equals("FullyCoupled"))
+            m.sol(sol).feature(f).feature(sub).set("termonres", "on");
     StudyFeature s = m.study("std2").feature("stat");
     s.set("useparam", true);
     s.set("pname", new String[]{"Va"}); s.set("punit", new String[]{"V"});
     s.set("pcontinuation", "Va");
+    // The Application Library model defines Nc, Nv such that ni = Ni is independent of temperature.
+    // Use the usual T^1.5 scaling of the effective densities of states instead (ni(T) then follows from Eg).
+    m.param().set("Nc_param", "2.86e19[1/cm^3]*(Tl/300[K])^1.5");
+    m.param().set("Nv_param", "2.66e19[1/cm^3]*(Tl/300[K])^1.5");
     NumericalFeature g = m.result().numerical().create("evIV", "EvalGlobal");
     g.set("data", "dset2");
     g.set("expr", new String[]{"Va", "semi2.I0_2"});
@@ -52,8 +63,7 @@ cat <<'EOF'
         m.param().set("Na", d[1] + "[1/cm^3]");
         m.param().set("Nd", d[2] + "[1/cm^3]");
         m.param().set("Tl", d[4] + "[K]");
-        m.component("comp1").physics("semi2").feature("tar1").set("taun", d[3] + "[s]");
-        m.component("comp1").physics("semi2").feature("tar1").set("taup", d[3] + "[s]");
+        m.param().set("taun_param", d[3] + "[s]");   // the SRH feature takes its lifetime from the material, which uses taun_param
         int n = sweep(m, FWD, d, false);
         try { n += sweep(m, REV, d, true); } catch (Exception e) { out("FAILREV," + d[0] + "," + oneLine(e)); }
         out(String.format(java.util.Locale.ROOT, "DONE,%s,%d,%.1f", d[0], n, (System.currentTimeMillis() - t0) / 1000.0));

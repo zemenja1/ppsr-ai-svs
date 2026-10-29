@@ -18,8 +18,14 @@ surrogates.
 
 ```
 comsol_datasets/   COMSOL training data (CSV), generation scripts, documentation
-notebooks/         Google Colab notebooks (coming)
+notebooks/         Google Colab notebooks (notebooks/src: the same notebooks as plain Python, jupytext format)
 ```
+
+## Notebooks
+
+| Notebook | Content | |
+|---|---|---|
+| `01_pn_diode.ipynb` | pn diode: physics, DEVSIM simulation, DNN surrogate trained on COMSOL and DEVSIM data | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/zemenja1/ppsr-ai-svs/blob/main/notebooks/01_pn_diode.ipynb) |
 
 See [comsol_datasets/README.md](comsol_datasets/README.md) for the description of all datasets.
 

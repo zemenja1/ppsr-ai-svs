@@ -15,7 +15,7 @@ The models are from the COMSOL Application Library (Semiconductor Module). The `
 licensed under the COMSOL Software License Agreement and are **not** included in this repository;
 `scripts/setup_models.sh` copies them from your own COMSOL installation.
 
-## Contents of the current version (generated 2026-10-29, COMSOL 6.3, ~6.5 h on a laptop)
+## Contents of the current version (v3, generated 2026-10-29, COMSOL 6.3, ~8 h on a laptop in total)
 
 | File | Rows | Contents |
 |---|---|---|
@@ -34,6 +34,23 @@ Known gaps:
   second hypercube (`m0151`–`m0156`); the second batch was cut by the time budget.
 * The solar cells are the first 450 of a 600-cell Latin hypercube (cut by the time budget; because
   the sample order is random, the 450 cells still cover the whole parameter space).
+
+### Version history
+* **v1 (2026-10-29, morning):** in the pn diode and solar cell data the `tau_s` column had **no
+  effect** – the COMSOL recombination features took the lifetime from the material, so the value set by
+  the generator was ignored (diode: τ = 1 µs, solar cell: τ = 10 µs for all devices). In the diode data
+  nᵢ was also independent of temperature, so currents *decreased* with T. Found when comparing COMSOL
+  with DEVSIM; both datasets were regenerated.
+* **v2 (2026-10-29, late morning):** lifetime and nᵢ(T) corrected. But in ~60 % of the diode curves one
+  reverse-bias point (and in ~1 % of the solar J–V curves one low-voltage point) was wrong: COMSOL's
+  default convergence test checks only the size of the Newton update, and accepted iterations that had
+  stalled with a large residual – without any warning. Found by checking the curves for smoothness.
+* **v3 (2026-10-29):** pn diode and solar cell data regenerated with `termonres = on` (the residual must
+  be small, too) for all nonlinear solvers. Reverse currents now agree with DEVSIM to ~4 digits above
+  ~1e-7 A/cm². All 500 diode I–V curves are monotonic. In 13 solar J–V curves J rises by < 3e-5
+  (relative) between neighbouring points on the flat plateau below the maximum power point – solver
+  tolerance, not an error. The MOSFET data were checked (all Id(Vd) and Id(Vg) curves monotonic) and
+  not regenerated.
 
 ## Files
 
@@ -83,6 +100,11 @@ narrowing.
 Base model: *P–N Junction 1D* (`Semiconductor_Module/Verification_Examples/pn_junction_1d`), finite
 volume formulation (Scharfetter–Gummel, the same discretization as DEVSIM). Abrupt silicon junction,
 5 µm long, doping-dependent and temperature-dependent mobility, SRH recombination.
+Two changes against the Application Library model: the SRH lifetime is set through the model parameter
+`taun_param` (the recombination feature takes its lifetime from the material), and the effective
+densities of states scale as `Nc, Nv ∝ (T/300 K)^1.5` (the library model keeps nᵢ = 1.25e10 cm⁻³ at every
+temperature). A DEVSIM implementation of the same model (notebook `01_pn_diode`) agrees within ~0.1 % in
+forward bias.
 
 | Column | Meaning | Range |
 |---|---|---|
@@ -96,7 +118,8 @@ volume formulation (Scharfetter–Gummel, the same discretization as DEVSIM). Ab
 ### Silicon solar cell (1D)
 Base model: *Si Solar Cell 1D* (`Semiconductor_Module/Photonic_Devices_and_Sensors/si_solar_cell_1d`):
 n-type base, Gaussian p+ emitter at the illuminated front, generation from the AM1.5 spectrum and the
-Si absorption coefficient (250–1300 nm), SRH recombination. Area 1 cm².
+Si absorption coefficient (250–1300 nm), SRH recombination. Area 1 cm². The SRH lifetime is switched
+from the material value (10 µs) to the user-defined value `tau_s`.
 
 | Column | Meaning | Range |
 |---|---|---|
@@ -120,7 +143,9 @@ Si absorption coefficient (250–1300 nm), SRH recombination. Area 1 cm².
   diode reverse vs. forward). Train on a transformed target, e.g. `log10(|I| + I_floor)` or
   `asinh(I / I_scale)`, otherwise the network ignores the small currents.
 * **Numerical noise floor:** MOSFET currents below ~1e-12 A/µm (and at Vd = 0) are numerical noise
-  and can have either sign. Diode currents at V = 0 are ~0 (noise).
+  and can have either sign. Diode current densities below ~1e-8 A/cm² (V ≈ 0, reverse bias of
+  long-lifetime diodes) are below the resolution of the simulators: at the heavily doped contacts the
+  current is a tiny difference of huge drift and diffusion terms.
 * **Solar cell beyond Voc:** points with V > Voc have large negative J (forward diode current). Keep
   them for full J–V learning, or drop rows with `J_mA_cm2 < 0` when learning the power-producing part.
 * **Latin hypercube & random order:** any subset of devices is still a reasonable sample. Split
