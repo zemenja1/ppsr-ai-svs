@@ -36,6 +36,31 @@ t1=("$LOGS"/10_mos_t1_*.log); t1i=("$LOGS"/11_mos_t1_*.log); t2=("$LOGS"/3?_mos_
             s = st[d]; if (s == "ok" && fv[d] > 0) s = "partial"
             print d","(d in p ? p[d] : ",,,,")","s","n1[d]","n2[d]","rt[d] } }' "${t2[@]}" | sort
 } > "$OUT/mosfet/mosfet_tier2_devices.csv"
+# Dense Id-Vg sweeps (Vd = 10 mV) of the tier 2 devices, non-uniform Vg steps around the threshold voltage
+tf=("$LOGS"/50_mos_fine_*.log)
+{
+  echo "device_id,NA_cm3,tox_nm,Lg_um,xj_um,T_K,Vg_V,Vd_V,Id_A_per_um"
+  [ ${#tf[@]} -gt 0 ] && awk -F, '$1=="FINE" && $2=="t2" { k=$3","$9; if (!(k in s)) { s[k]=1; print $3","$4","$5","$6","$7","$8","$9","$10","$11 } }' "${tf[@]}" | sort -t, -k1,1 -k7,7g
+} > "$OUT/mosfet/mosfet_tier2_idvg_fine.csv"
+
+# ---------- 2D diode with self-heating (chip area 3 um x 1 um = 3e-8 cm^2) ----------
+mkdir -p "$OUT/thermal_diode"
+th=("$LOGS"/60_thermal_*.log)
+{
+  echo "device_id,NA_cm3,xj_um,tau_s,T0_K,rth_Kcm2_W,sweep,V_V,I_A,J_A_cm2,Tj_K"
+  # isothermal rows ordered by V (the current near V = 0 is numerical noise), self-heating rows by J
+  [ ${#th[@]} -gt 0 ] && awk -F, '($1=="ISO" || $1=="HOT") {
+      sw = ($1 == "ISO") ? "isothermal" : "selfheating"; k = $2","sw","$8","$9
+      if (!(k in s)) { s[k]=1; printf "%.9e,%s,%s,%s,%s,%s,%s,%s,%s,%s,%.6e,%s\n", ($1 == "ISO") ? $8 : $9, $2,$3,$4,$5,$6,$7,sw,$8,$9,$9/3e-8,$10 } }' "${th[@]}" |
+    sort -t, -k2,2 -k8,8 -k1,1g | cut -d, -f2-
+} > "$OUT/thermal_diode/thermal_diode_iv.csv"
+{
+  echo "device_id,status,n_isothermal,n_selfheating,runtime_s"
+  [ ${#th[@]} -gt 0 ] && awk -F, '
+    $1=="DONE" { st[$2] = ($4 == 17) ? "ok" : "partial"; n1[$2]=$3; n2[$2]=$4; rt[$2]=$5 }
+    $1=="FAIL" { if (!($2 in st)) st[$2]="failed" }
+    END { for (d in st) print d","st[d]","n1[d]","n2[d]","rt[d] }' "${th[@]}" | sort
+} > "$OUT/thermal_diode/thermal_diode_devices.csv"
 
 # ---------- pn diode (1D, cross-section area 4 um^2 = 4e-8 cm^2) ----------
 dl=("$LOGS"/20_diode_*.log)
