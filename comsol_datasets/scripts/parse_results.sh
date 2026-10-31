@@ -62,6 +62,31 @@ th=("$LOGS"/60_thermal_*.log)
     END { for (d in st) print d","st[d]","n1[d]","n2[d]","rt[d] }' "${th[@]}" | sort
 } > "$OUT/thermal_diode/thermal_diode_devices.csv"
 
+# ---------- bipolar transistor with self-heating (2D, out-of-plane length 3 um; currents into the contacts) ----------
+mkdir -p "$OUT/bjt_thermal"
+bj=("$LOGS"/70_bjt*.log)
+# Only the 11 V_B points of the Gummel sweep are kept: a study that stops early leaves its last step-reduced
+# point (off grid) or, if std7 never converged, the stored V_B = 0 solution in the dataset.
+BJGRID='function ongrid(v) { v += 0; return v > 0.39 && v < 1.11 && (v * 20 - int(v * 20 + 0.5)) ^ 2 < 1e-8 }'
+{
+  echo "sample_id,T0_K,R_K_W,VC_V,NB_cm3,Nepi_cm3,sweep,VB_V,IE_A,IB_A,IC_A,Tmax_K"
+  [ ${#bj[@]} -gt 0 ] && awk -F, "$BJGRID"'
+    ($1=="ISO" || $1=="HOT") && ongrid($8) {
+      sw = ($1 == "ISO") ? "isothermal" : "selfheating"; k = $2","sw","$8
+      if (!(k in s)) { s[k]=1; print $2","$3","$4","$5","$6","$7","sw","$8","$9","$10","$11","$12 } }' "${bj[@]}" |
+    sort -t, -k1,1 -k7,7 -k8,8g
+} > "$OUT/bjt_thermal/bjt_thermal_gummel.csv"
+{
+  echo "sample_id,status,n_isothermal,n_selfheating,runtime_s"
+  [ ${#bj[@]} -gt 0 ] && awk -F, "$BJGRID"'
+    ($1=="ISO" || $1=="HOT") && ongrid($8) { k = $1","$2","$8; if (!(k in seen)) { seen[k]=1; if ($1 == "ISO") n1[$2]++; else n2[$2]++ } }
+    $1=="DONE" { st[$2] = "done"; rt[$2]=$5 }
+    $1=="FAIL" { if (!($2 in st)) st[$2]="failed" }
+    END { for (d in st) { a = n1[d] + 0; b = n2[d] + 0
+            s = (st[d] == "failed") ? "failed" : (a == 11 && b == 11) ? "ok" : "partial"
+            print d","s","a","b","rt[d] } }' "${bj[@]}" | sort
+} > "$OUT/bjt_thermal/bjt_thermal_samples.csv"
+
 # ---------- pn diode (1D, cross-section area 4 um^2 = 4e-8 cm^2) ----------
 dl=("$LOGS"/20_diode_*.log)
 {
