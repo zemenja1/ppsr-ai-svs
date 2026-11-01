@@ -11,13 +11,13 @@ GitHub and loaded directly into Google Colab.
 | 2. Silicon solar cell (1D) | `si_solar_cell_1d` | base/emitter doping, emitter depth, thickness, lifetime, irradiance, temperature, voltage V | current density J (+ Jsc, Voc, FF, η per cell) |
 | 3. MOSFET (2D) | `mosfet` | Vg, Vd (tier 1); + NA, tox, Lg, junction depth, temperature (tier 2) | drain current Id |
 | 4. Diode with self-heating (2D) | built from `mosfet` | NA, junction depth, lifetime, ambient temperature, thermal resistance, bias | V, I, junction temperature Tj |
-| 5. Bipolar transistor with self-heating (2D) | `bipolar_transistor_thermal` | ambient temperature, thermal resistance (cooling), collector voltage, base and epi doping, base voltage | emitter/base/collector currents, maximum temperature |
+| 5. Bipolar transistor with self-heating (2D) | `bipolar_transistor_thermal` | ambient temperature, thermal resistance (cooling), base and epi doping; base voltage and collector voltage (Gummel) or base current and collector voltage (output characteristics) | emitter/base/collector currents, V_BE, maximum temperature |
 
 The models are from the COMSOL Application Library (Semiconductor Module). The `.mph` files are
 licensed under the COMSOL Software License Agreement and are **not** included in this repository;
 `scripts/setup_models.sh` copies them from your own COMSOL installation.
 
-## Contents of the current version (v5, generated 2026-10-29/31, COMSOL 6.3, ~26 h on a laptop in total)
+## Contents of the current version (v6, generated 2026-10-29 – 2026-11-01, COMSOL 6.3, ~55 h on a laptop in total)
 
 | File | Rows | Contents |
 |---|---|---|
@@ -31,8 +31,10 @@ licensed under the COMSOL Software License Agreement and are **not** included in
 | `solar_cell/solar_cell_summary.csv` | 450 | one row per cell |
 | `thermal_diode/thermal_diode_iv.csv` | 7 520 | 188 diodes × (23 isothermal + 17 self-heating points) |
 | `thermal_diode/thermal_diode_devices.csv` | 210 | 188 `ok`, 22 `failed` (see below) |
-| `bjt_thermal/bjt_thermal_gummel.csv` | 6 047 | 276 samples × (11 isothermal + 11 self-heating Gummel points), 25 missing |
-| `bjt_thermal/bjt_thermal_samples.csv` | 276 | 272 `ok`, 4 `partial` (see below) |
+| `bjt_thermal/bjt_thermal_gummel.csv` | 8 773 | 400 samples × (11 isothermal + 11 self-heating Gummel points), 27 missing |
+| `bjt_thermal/bjt_thermal_samples.csv` | 400 | 395 `ok`, 5 `partial` (see below) |
+| `bjt_thermal/bjt_thermal_output.csv` | 22 643 | 396 samples × 3 base currents × 10 collector voltages × 2 (isothermal, self-heating), 1 117 missing |
+| `bjt_thermal/bjt_thermal_output_samples.csv` | 399 | 337 `ok`, 59 `partial`, 3 `failed` (see below) |
 
 Known gaps:
 * MOSFET devices `m0055` and `m0067` (NA ≈ 2.6e17 cm⁻³ at T ≈ 282–286 K) did not converge at the first
@@ -45,9 +47,15 @@ Known gaps:
   failed in the isothermal sweep and have no data; 19 of them have NA < 2.2e16 cm⁻³ (19 of the 50
   diodes in that range failed), so **low substrate doping is under-sampled** – keep this in mind when
   testing the network near NA = 1e16 cm⁻³.
-* Bipolar transistor: 276 of a 400-sample Latin hypercube were computed (cut by the time budget; the
-  order is random). 4 samples are incomplete: `b0013` and `b0019` have no self-heating points (the
-  coupled study did not converge), `b0022` and `b0148` miss the top 1–2 isothermal points.
+* Bipolar transistor, Gummel plots: all 400 samples were computed. 5 samples are incomplete: `b0013`
+  and `b0019` have no self-heating points (the coupled study did not converge), `b0022`, `b0148` and
+  `b0308` miss the top 1–2 isothermal points.
+* Bipolar transistor, output characteristics: `b0022`, `b0148` and `b0308` failed in the initialization
+  (the same samples are incomplete in the Gummel data), and `b0312` is missing because its job hit the
+  time limit. In 59 samples one or two curves are missing – almost always the whole curve of one base
+  current, 100 µA or 1 mA, isothermal and therefore also self-heating (the self-heating sweep starts
+  from the isothermal one). These failures are more frequent at low T0 and high collector voltage of
+  the starting point, so **high base current at low ambient temperature is under-sampled**.
 
 ### Version history
 * **v1 (2026-10-29, morning):** in the pn diode and solar cell data the `tau_s` column had **no
@@ -71,6 +79,10 @@ Known gaps:
 * **v5 (2026-10-31, night):** added the bipolar transistor with self-heating (`bjt_thermal/`), computed
   with the studies of the Application Library model *bipolar_transistor_thermal*. It is the recommended
   self-heating case study (the diode uses a lumped thermal model); `thermal_diode/` is kept unchanged.
+* **v6 (2026-11-01):** bipolar transistor: the remaining 124 Gummel samples (`b0277`–`b0400`), and the
+  output characteristics (`bjt_thermal_output.csv`) of the same 400 samples. The Gummel parser now keeps
+  only the 11 grid points of V_B (two partial curves had contained points of a failed step-size
+  reduction).
 
 ## Files
 
@@ -93,8 +105,10 @@ data/
   bjt_thermal/
     bjt_thermal_gummel.csv      Gummel plots (V_B sweep at fixed V_C), isothermal and with self-heating
     bjt_thermal_samples.csv     one row per sample: status, number of points, runtime
+    bjt_thermal_output.csv      output characteristics I_C(V_C) at fixed base current, isothermal and self-heating
+    bjt_thermal_output_samples.csv  one row per sample of the output characteristics
 scripts/                        generators, job queue, parser (see "Regenerating the data")
-logs/comsol_job_logs.tar.gz     raw COMSOL job logs + Latin hypercube samples of this run
+logs/comsol_job_logs.tar.gz     raw COMSOL job logs + Latin hypercube samples of this run (progress and memory lines removed from the 71_bjto logs)
 ```
 
 All CSV files have one header row, comma separators and units in the column names.
@@ -244,7 +258,7 @@ The generator therefore needs the model **saved after computing all studies in t
 device to other T0 or doping values also diverges, so study 5 is solved as a continuation in one
 auxiliary parameter p = 0 … 2 with automatic step control: for p = 0 … 1 T0, N_B and N_epi move from
 the library values to the sample values (the doping geometrically); for p = 1 … 2 V_C ramps from 0.5 V
-to the sample value. When study 7 does not converge from the V_B = 0 solution (49 of 276 samples), it
+to the sample value. When study 7 does not converge from the V_B = 0 solution (about 1 sample in 6), it
 is restarted from the first isothermal point (V_B = 0.4 V), which rescued all but 2 samples. For the
 library device the batch run reproduces the stored GUI result (Tmax = 347.51 K at V_B = 1.1 V).
 
@@ -276,7 +290,44 @@ only with a large current floor).
 
 Ideas for students: learn I_C(V_B, V_C, T0, R, doping) and compare the isothermal and self-heating
 predictions; predict Tmax; find the cooling (R) needed to keep Tmax below a limit; look at the current
-gain β = I_C / I_B vs. base doping and temperature.
+gain β = I_C / I_B vs. base doping and temperature. Notebook `03_bjt_thermal` does this.
+
+The self-heating is much larger than R · P: a straight-line fit gives (Tmax − T0)/P ≈ 620 K/W + 0.94 · R
+at V_B = 1.0 V (r = 0.94). The intercept is the thermal resistance of the silicon itself.
+
+**Output characteristics** (`bjt_thermal_output.csv`): the same 400 samples, common emitter, the base
+contact driven by a current. The base contact feature *Base Current* of the library model (used by its
+studies 3 and 4, inactive in studies 5–7) is switched on, and V_C is swept from the sample's own V_C
+(`VC0_V`; the starting solution is the point of the isothermal Gummel sweep with the closest base
+current) down to 0 V and up to 5 V, first with heat transfer off (study `sto1`, `isothermal`) and then
+fully coupled, starting from the first isothermal point (study `sto2`, `selfheating`). The studies are
+new, with default solvers: the stored solver sequences of studies 3 and 4 belong to the isothermal
+library model and do not converge here. The library studies 1–4 themselves cannot be used in batch mode
+(they start from T = 0 K, see above).
+
+| Column | Meaning | Range |
+|---|---|---|
+| `T0_K`, `R_K_W`, `NB_cm3`, `Nepi_cm3` | as in the Gummel data | |
+| `VC0_V` | the sample's collector voltage = starting point of the two V_C sweeps (it should not influence the result) | 1 – 5 V |
+| `sweep` | `isothermal` or `selfheating` | |
+| `IB_A` | applied base current | 10 µA, 100 µA, 1 mA |
+| `VC_V` | collector voltage | 0, 0.1, 0.2, 0.5, 1, 2, 3, 4, 5 V and `VC0_V` |
+| `IE_A`, `IC_A` | emitter and collector currents into the contacts | I_C up to 34 mA |
+| `VBE_V` | base voltage needed for `IB_A` | |
+| `Tmax_K` | maximum temperature in the device | up to 482 K (heating up to 145 K) |
+
+Checks done on the data:
+* no NaN; I_E + I_B + I_C = 0 to 1e-2 (relative) everywhere and to 1e-3 except for 46 self-heating
+  points; isothermal Tmax = T0 exactly;
+* at V_C = 0 the transistor is in saturation and I_C < 0 in all curves;
+* self-heating raises I_C at V_C ≥ 0.5 V by a median of 0.3 % at 10 µA, 1.5 % at 100 µA and 4 % at
+  1 mA (up to 22 %); the temperature rise reaches 7 K, 40 K and 145 K;
+* I_C is monotonic in V_C from 0.5 V up (one step of 1e-3 relative at 4.99 → 5 V excepted);
+* at V_C = 0 the self-heating Tmax can be up to 5 mK *below* T0 (net cooling by recombination and the
+  thermoelectric terms), not an error.
+
+A sweep that fails at its first step leaves a single meaningless point in the log (I_E = I_C = 0 or
+NaN); the parser drops these.
 
 ## Notes for training
 
@@ -306,6 +357,7 @@ solar = pd.read_csv(f"{base}/solar_cell/solar_cell_summary.csv")
 thermal = pd.read_csv(f"{base}/thermal_diode/thermal_diode_iv.csv")
 bjt = pd.read_csv(f"{base}/bjt_thermal/bjt_thermal_gummel.csv")
 bjt = bjt[bjt.VB_V >= 0.5]   # V_B = 0.4 V is at the numerical noise floor
+bjt_out = pd.read_csv(f"{base}/bjt_thermal/bjt_thermal_output.csv")
 ```
 
 ## Regenerating the data
@@ -317,7 +369,8 @@ COMSOL batch Java code cannot write files, so each job prints its results to std
 0. `setup_models.sh` – copies the base models from your COMSOL Application Library (and the solved
    bipolar transistor model, see above) into the run directory.
 1. `prepare_mosfet.sh`, `prepare_diode.sh`, `prepare_solar.sh`, `prepare_thermal.sh`, `prepare_bjt.sh` (and
-   `prepare_mosfet_fine.sh` for the dense Id–Vg sweeps) – sample the device parameters
+   `prepare_mosfet_fine.sh` for the dense Id–Vg sweeps; `MAKE=make_bjt_out_job.sh SEC=1200 GROUP=71
+   TAG=bjto bash prepare_bjt.sh` for the bipolar output characteristics) – sample the device parameters
    (`lhs.awk`, fixed random seeds), write and compile one COMSOL Java class per job
    (`make_*_job.sh`) and put the jobs into the queue directory.
 2. `run_queue.sh` – runs up to 4 COMSOL batch processes in parallel (3 cores each), in job-name

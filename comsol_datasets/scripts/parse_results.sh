@@ -86,6 +86,27 @@ BJGRID='function ongrid(v) { v += 0; return v > 0.39 && v < 1.11 && (v * 20 - in
             s = (st[d] == "failed") ? "failed" : (a == 11 && b == 11) ? "ok" : "partial"
             print d","s","a","b","rt[d] } }' "${bj[@]}" | sort
 } > "$OUT/bjt_thermal/bjt_thermal_samples.csv"
+# Output characteristics I_C(V_C) at fixed base current (base driven by current, V_BE computed). Each curve is
+# computed in two sweeps from the sample's own V_C (down to 0 V and up to 5 V), so that point appears twice.
+bo=("$LOGS"/71_bjto*.log)
+{
+  echo "sample_id,T0_K,R_K_W,VC0_V,NB_cm3,Nepi_cm3,sweep,IB_A,VC_V,IE_A,IC_A,VBE_V,Tmax_K"
+  # a sweep that failed at its first step still leaves one point (I_E = I_C = 0 or NaN): skip it
+  [ ${#bo[@]} -gt 0 ] && awk -F, '($1=="OISO" || $1=="OHOT") && $10 != "NaN" && $10 + 0 != 0 {
+      sw = ($1 == "OISO") ? "isothermal" : "selfheating"; k = $2","sw","$8","$9
+      if (!(k in s)) { s[k]=1; print $2","$3","$4","$5","$6","$7","sw","$8","$9","$10","$11","$13","$14 } }' "${bo[@]}" |
+    sort -t, -k1,1 -k7,7 -k8,8g -k9,9g
+} > "$OUT/bjt_thermal/bjt_thermal_output.csv"
+{
+  echo "sample_id,status,n_isothermal,n_selfheating,runtime_s"
+  [ ${#bo[@]} -gt 0 ] && awk -F, '
+    ($1=="OISO" || $1=="OHOT") && $10 != "NaN" && $10 + 0 != 0 { k = $1","$2","$8","$9; if (!(k in seen)) { seen[k]=1; if ($1 == "OISO") n1[$2]++; else n2[$2]++ } }
+    $1=="DONE" { st[$2] = "done"; rt[$2]=$5 }
+    $1=="FAIL" { if (!($2 in st)) st[$2]="failed" }
+    END { for (d in st) { a = n1[d] + 0; b = n2[d] + 0
+            s = (st[d] == "failed") ? "failed" : (a == b && a >= 27) ? "ok" : "partial"
+            print d","s","a","b","rt[d] } }' "${bo[@]}" | sort
+} > "$OUT/bjt_thermal/bjt_thermal_output_samples.csv"
 
 # ---------- pn diode (1D, cross-section area 4 um^2 = 4e-8 cm^2) ----------
 dl=("$LOGS"/20_diode_*.log)
