@@ -1,0 +1,15 @@
+# COMSOL model files are licensed under the COMSOL Software License Agreement; do not publish them.
+*.mph
+*.mph.lock
+*.mphbin
+*.class
+
+# Python / Jupyter
+__pycache__/
+.ipynb_checkpoints/
+*.pyc
+
+# OS / editors
+.DS_Store
+Thumbs.db
+desktop.ini
