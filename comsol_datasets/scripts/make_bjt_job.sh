@@ -8,6 +8,8 @@
 #   std6  Gummel sweep V_B = 0.4 ... 1.1 V, semiconductor at constant T0 (tag ISO)
 #   std7  the same sweep, fully coupled with heat transfer (tag HOT, with the maximum temperature)
 # samples.txt lines: id;T0_K;R_K_W;VC_V;NB_cm3;Nepi_cm3
+# MESH_Y=<n>: n mapped-mesh elements through the device depth instead of the library's 100 (same grading);
+# the library mesh is not converged at high current (I_C at V_B = 1.1 V is ~25 % too high), 400 gives ~7 %.
 cls="$1"; dev="$2"; base="$3"; out="$4"
 {
 cat <<EOF
@@ -44,6 +46,7 @@ cat <<'EOF'
   public static Model run() {
     Model m;
     try { m = ModelUtil.load("m", BASE); } catch (java.io.IOException e) { throw new RuntimeException(e); }
+    // MESH
     NumericalFeature ev = m.result().numerical().create("ev", "EvalGlobal");
     ev.set("expr", new String[]{"V_B", "semi.I0_1", "semi.I0_2", "semi.I0_3"});
     NumericalFeature mx = m.result().numerical().create("mx", "MaxSurface");
@@ -93,3 +96,8 @@ cat <<'EOF'
 }
 EOF
 } > "$out"
+if [ -n "$MESH_Y" ]; then
+  sed -i "s|    // MESH|    m.component(\"comp1\").mesh(\"mesh1\").feature(\"map1\").feature(\"dis1\").set(\"elemcount\", \"$MESH_Y\"); m.component(\"comp1\").mesh(\"mesh1\").run(); out(\"MESH,\" + m.component(\"comp1\").mesh(\"mesh1\").getNumElem());|" "$out"
+else
+  sed -i "/    \/\/ MESH/d" "$out"
+fi

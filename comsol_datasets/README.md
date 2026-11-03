@@ -16,7 +16,7 @@ The models are from the COMSOL Application Library (Semiconductor Module). The `
 licensed under the COMSOL Software License Agreement and are **not** included in this repository;
 `scripts/setup_models.sh` copies them from your own COMSOL installation.
 
-## Contents of the current version (v7, COMSOL 6.3, ~55 h in total on 12 CPU cores)
+## Contents of the current version (v8, COMSOL 6.3, ~55 h on 12 CPU cores + ~5 h on 20 cores for the fine-mesh subset)
 
 | File | Rows | Contents |
 |---|---|---|
@@ -30,6 +30,8 @@ licensed under the COMSOL Software License Agreement and are **not** included in
 | `solar_cell/solar_cell_summary.csv` | 450 | one row per cell |
 | `bjt_thermal/bjt_thermal_gummel.csv` | 8 773 | 400 samples × (11 isothermal + 11 self-heating Gummel points), 27 missing |
 | `bjt_thermal/bjt_thermal_samples.csv` | 400 | 395 `ok`, 5 `partial` (see below) |
+| `bjt_thermal/bjt_thermal_gummel_finemesh.csv` | 1 540 | samples `b0001`–`b0070` of the Gummel data recomputed on a 4× finer mesh (more accurate at high current, see below) |
+| `bjt_thermal/bjt_thermal_finemesh_samples.csv` | 70 | 70 `ok` |
 | `bjt_thermal/bjt_thermal_output.csv` | 22 643 | 397 samples × 3 base currents × 10 collector voltages × 2 (isothermal, self-heating), 1 177 missing |
 | `bjt_thermal/bjt_thermal_output_samples.csv` | 400 | 337 `ok`, 60 `partial`, 3 `failed` (see below) |
 
@@ -77,6 +79,9 @@ Known gaps:
   reduction).
 * **v7:** removed the diode with self-heating (`thermal_diode/`, lumped thermal model); the bipolar
   transistor is the self-heating case study.
+* **v8:** bipolar transistor: mesh study at high current and a fine-mesh subset
+  (`bjt_thermal_gummel_finemesh.csv`, the first 70 Gummel samples on a 48 000-element mesh). With the
+  fine mesh COMSOL agrees with DEVSIM to a few % up to V_B = 1.1 V. Existing files unchanged.
 
 ## Files
 
@@ -96,6 +101,8 @@ data/
   bjt_thermal/
     bjt_thermal_gummel.csv      Gummel plots (V_B sweep at fixed V_C), isothermal and with self-heating
     bjt_thermal_samples.csv     one row per sample: status, number of points, runtime
+    bjt_thermal_gummel_finemesh.csv  the first 70 Gummel samples on a finer mesh (same columns)
+    bjt_thermal_finemesh_samples.csv one row per fine-mesh sample
     bjt_thermal_output.csv      output characteristics I_C(V_C) at fixed base current, isothermal and self-heating
     bjt_thermal_output_samples.csv  one row per sample of the output characteristics
 scripts/                        generators, job queue, parser (see "Regenerating the data")
@@ -230,19 +237,39 @@ I_E + I_B + I_C deviates from 0 by more than 1 % in 24 % of the isothermal and 5
 rows, and in 59 self-heating curves I_C(0.4 V) > I_C(0.5 V). Drop V_B = 0.4 V for training (or use it
 only with a large current floor).
 
-**Accuracy at high current (cross-check with DEVSIM).** The isothermal Gummel data were
-recomputed with DEVSIM (2D, same geometry, doping, and physics – note that the base and buried-collector
-Gaussian tails of the library model fall to N_epi, not to the 1e15 cm⁻³ shown in the doping features,
-because their background doping is taken from the existing doping). For 9 samples covering the extremes
-of all parameters, DEVSIM agrees within 2 % in I_C for V_B ≤ 0.85 V and within 3 % in I_B for
-V_B ≤ 0.6 V. At higher current the library mesh (12 000 elements) is too coarse: refining it once
-(48 000 elements) lowers the COMSOL I_C of the library device by 6 % at V_B = 1.0 V and by 8 % at 1.1 V,
-towards DEVSIM (mesh-converged), and the extrapolation of the two COMSOL meshes lands within 2 % of
-DEVSIM. The data are smooth and consistent, so this does not matter for training a surrogate, but
-as device physics the high-current points are less accurate: at V_B = 0.95–1.1 V DEVSIM gives 3–28 %
-less I_C than COMSOL (most at low T0), and at V_B = 0.7–1.0 V up to 39 % more I_B (at T0 ≈ 273 K). The
-mesh refinement was checked only for the library device. In the output characteristics DEVSIM gives
-7–15 % less I_C at the same base current (checked for `b0001`).
+**Accuracy at high current (cross-check with DEVSIM).** The Gummel data were recomputed with DEVSIM
+(2D, same geometry, doping and physics, with self-heating solved by a finite-volume heat equation on
+the same mesh – note that the base and buried-collector Gaussian tails of the library model fall to
+N_epi, not to the 1e15 cm⁻³ shown in the doping features, because their background doping is taken
+from the existing doping). At low current the two agree within 2 % in I_C (V_B ≤ 0.85 V), and the
+thermal resistance (Tmax − T0)/P within 4 %. **At high current the library mesh (12 000 elements) is
+too coarse**, mainly in the depth direction (the distribution of 100 elements along the vertical edges).
+Library device, V_B = 1.1 V, V_C = 3 V:
+
+| Mesh | Elements | I_C isothermal | I_C self-heating | Tmax |
+|---|---|---|---|---|
+| library | 12 000 | 23.06 mA | 26.09 mA | 347.5 K |
+| 200 elements in depth | 24 000 | 20.91 mA | 23.56 mA | 341.9 K |
+| 400 elements in depth (`finemesh`) | 48 000 | 19.78 mA | 22.29 mA | 339.0 K |
+| extrapolated (Richardson) | ∞ | ≈ 18.5 mA | ≈ 21.0 mA | ≈ 336 K |
+| DEVSIM (mesh-converged) | – | 18.84 mA | 20.47 mA | 335.0 K |
+
+Refining in the lateral direction barely changes the result; a less graded or uniform depth mesh is
+worse. The first 70 samples were therefore recomputed with 400 elements in depth
+(`bjt_thermal_gummel_finemesh.csv`). Over these 70 samples the library mesh gives, relative to the fine
+mesh, +12 % I_C at V_B = 1.1 V (median; up to +33 %, most at low T0), +8 % at 1.0 V, < 1 % at
+V_B ≤ 0.85 V, and 5–8 % *less* I_B at V_B = 0.8–0.95 V; Tmax − T0 changes like I_C. Against DEVSIM
+(16 samples), the library mesh is off by +16 % in I_C at 1.1 V (median, up to +49 %) and by −11 % in
+I_B at 0.9 V (up to −25 %); the fine mesh by +3 % (up to +12 %) and −3 % (up to −8 %). With self-heating
+the fine mesh is +6 % (up to +13 %) in I_C and +5 % in Tmax − T0 at 1.1 V: the self-heating gain
+I_C(self-heating)/I_C(isothermal) is the same on both COMSOL meshes (1.14 at 1.1 V, median) but
+smaller in DEVSIM (≈ 1.09) – a remaining model difference that was not resolved. Sample `b0013`, which
+has no self-heating points in the main data, converged on the fine mesh.
+
+For training a surrogate this hardly matters (the main data are smooth and consistent); for device
+physics, or to see how the discretization affects a model, compare the two files. In the output
+characteristics (library mesh only) DEVSIM gives 7–15 % less I_C at the same base current (checked for
+`b0001`).
 
 Ideas for students: learn I_C(V_B, V_C, T0, R, doping) and compare the isothermal and self-heating
 predictions; predict Tmax; find the cooling (R) needed to keep Tmax below a limit; look at the current
@@ -325,7 +352,9 @@ COMSOL batch Java code cannot write files, so each job prints its results to std
    bipolar transistor model, see above) into the run directory.
 1. `prepare_mosfet.sh`, `prepare_diode.sh`, `prepare_solar.sh`, `prepare_bjt.sh` (and
    `prepare_mosfet_fine.sh` for the dense Id–Vg sweeps; `MAKE=make_bjt_out_job.sh SEC=1200 GROUP=71
-   TAG=bjto bash prepare_bjt.sh` for the bipolar output characteristics) – sample the device parameters
+   TAG=bjto bash prepare_bjt.sh` for the bipolar output characteristics; `MESH_Y=400 PER_JOB=2 SEC=1500
+   GROUP=72 TAG=bjtf COUNT=200 bash prepare_bjt.sh` for the fine-mesh Gummel samples, run with
+   `MAXJOBS=5 NP=4`) – sample the device parameters
    (`lhs.awk`, fixed random seeds), write and compile one COMSOL Java class per job
    (`make_*_job.sh`) and put the jobs into the queue directory.
 2. `run_queue.sh` – runs up to 4 COMSOL batch processes in parallel (3 cores each), in job-name

@@ -45,10 +45,11 @@ tf=("$LOGS"/50_mos_fine_*.log)
 
 # ---------- bipolar transistor with self-heating (2D, out-of-plane length 3 um; currents into the contacts) ----------
 mkdir -p "$OUT/bjt_thermal"
-bj=("$LOGS"/70_bjt*.log)
 # Only the 11 V_B points of the Gummel sweep are kept: a study that stops early leaves its last step-reduced
 # point (off grid) or, if std7 never converged, the stored V_B = 0 solution in the dataset.
 BJGRID='function ongrid(v) { v += 0; return v > 0.39 && v < 1.11 && (v * 20 - int(v * 20 + 0.5)) ^ 2 < 1e-8 }'
+gummel() {  # gummel <log glob prefix> <data file> <samples file>
+bj=("$LOGS"/$1*.log)
 {
   echo "sample_id,T0_K,R_K_W,VC_V,NB_cm3,Nepi_cm3,sweep,VB_V,IE_A,IB_A,IC_A,Tmax_K"
   [ ${#bj[@]} -gt 0 ] && awk -F, "$BJGRID"'
@@ -56,7 +57,7 @@ BJGRID='function ongrid(v) { v += 0; return v > 0.39 && v < 1.11 && (v * 20 - in
       sw = ($1 == "ISO") ? "isothermal" : "selfheating"; k = $2","sw","$8
       if (!(k in s)) { s[k]=1; print $2","$3","$4","$5","$6","$7","sw","$8","$9","$10","$11","$12 } }' "${bj[@]}" |
     sort -t, -k1,1 -k7,7 -k8,8g
-} > "$OUT/bjt_thermal/bjt_thermal_gummel.csv"
+} > "$OUT/bjt_thermal/$2"
 {
   echo "sample_id,status,n_isothermal,n_selfheating,runtime_s"
   [ ${#bj[@]} -gt 0 ] && awk -F, "$BJGRID"'
@@ -66,7 +67,11 @@ BJGRID='function ongrid(v) { v += 0; return v > 0.39 && v < 1.11 && (v * 20 - in
     END { for (d in st) { a = n1[d] + 0; b = n2[d] + 0
             s = (st[d] == "failed") ? "failed" : (a == 11 && b == 11) ? "ok" : "partial"
             print d","s","a","b","rt[d] } }' "${bj[@]}" | sort
-} > "$OUT/bjt_thermal/bjt_thermal_samples.csv"
+} > "$OUT/bjt_thermal/$3"
+}
+gummel 70_bjt bjt_thermal_gummel.csv bjt_thermal_samples.csv
+# the same samples on a finer mesh (MESH_Y=400 in make_bjt_job.sh), as many as were computed
+gummel 72_bjtf bjt_thermal_gummel_finemesh.csv bjt_thermal_finemesh_samples.csv
 # Output characteristics I_C(V_C) at fixed base current (base driven by current, V_BE computed). Each curve is
 # computed in two sweeps from the sample's own V_C (down to 0 V and up to 5 V), so that point appears twice.
 bo=("$LOGS"/71_bjto*.log)
