@@ -28,7 +28,7 @@ notebooks/         Google Colab notebooks (notebooks/src: the same notebooks as 
 |---|---|---|
 | `01_pn_diode.ipynb` | pn diode: physics, DEVSIM simulation, DNN surrogate trained on COMSOL and DEVSIM data | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/zemenja1/ppsr-ai-svs/blob/main/notebooks/01_pn_diode.ipynb) |
 | `02_mosfet.ipynb` | MOSFET: physics, threshold voltage and square-law model, DNN for one transistor (tier 1) and for many designs (tier 2), physics checks | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/zemenja1/ppsr-ai-svs/blob/main/notebooks/02_mosfet.ipynb) |
-| `03_bjt_thermal.ipynb` | bipolar transistor with self-heating: physics, thermal resistance from the data, DNN for the Gummel and output characteristics (isothermal and self-heating), physics checks, safe operating voltage | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/zemenja1/ppsr-ai-svs/blob/main/notebooks/03_bjt_thermal.ipynb) |
+| `03_bjt_thermal.ipynb` | bipolar transistor with self-heating: physics, thermal resistance from the data, DNN for the Gummel and output characteristics (isothermal and self-heating), physics checks, quality of the training data (mesh convergence, DEVSIM cross-check), safe operating voltage | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/zemenja1/ppsr-ai-svs/blob/main/notebooks/03_bjt_thermal.ipynb) |
 
 See [comsol_datasets/README.md](comsol_datasets/README.md) for the description of all datasets.
 

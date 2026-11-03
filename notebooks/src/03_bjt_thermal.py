@@ -165,6 +165,7 @@
 # | `bjt_thermal_gummel.csv` | Gummel sweeps $V_B$ = 0.4, 0.5, …, 0.8, 0.85, …, 1.1 V at the sample's $V_C$; `sweep` = `isothermal` or `selfheating`; currents $I_E$, $I_B$, $I_C$ and the maximum temperature $T_{max}$ |
 # | `bjt_thermal_output.csv` | output characteristics: $I_B$ = 10 µA, 100 µA, 1 mA; $V_C$ = 0, 0.1, 0.2, 0.5, 1, 2, 3, 4, 5 V and the sample's own `VC0_V`; $I_E$, $I_C$, $V_{BE}$, $T_{max}$ |
 # | `bjt_thermal_samples.csv`, `bjt_thermal_output_samples.csv` | one row per sample: status (`ok`, `partial`, `failed`), number of points, runtime |
+# | `bjt_thermal_gummel_finemesh.csv`, `bjt_thermal_devsim.csv`, `bjt_thermal_mesh_study.csv` | checks of the data quality: a finer mesh and an independent simulator (Section 6.4) |
 #
 # Currents are positive when they flow **into** the contact, so $I_E<0$ and $I_E + I_B + I_C = 0$.
 # $T_{max}$ is the hottest point of the device (equal to $T_0$ in the isothermal sweeps).
@@ -639,6 +640,125 @@ fig.tight_layout()
 #   parameters vary; the network, evaluated at one design, should give a smooth curve near the line.
 
 # %% [markdown]
+# ### 6.4 How good are the training data? Mesh convergence and an independent check
+#
+# The network reproduces the COMSOL data to a few percent – but **are the data right?** A finite-element
+# solution depends on the mesh, and a surrogate can never be more accurate than the simulations it was trained
+# on. The library model was meshed for a demonstration, not for accurate high-current results. To check it,
+# three extra (small) datasets were computed:
+#
+# | file | content |
+# |---|---|
+# | `bjt_thermal_mesh_study.csv` | the library device ($T_0$ = 293.15 K, $R$ = 100 K/W, $V_C$ = 3 V) on 8 different meshes, plus the DEVSIM result |
+# | `bjt_thermal_gummel_finemesh.csv` | the first 70 samples (`b0001`–`b0070`) recomputed with 4× more elements in the depth direction (48 000 instead of 12 000) |
+# | `bjt_thermal_devsim.csv` | 23 samples recomputed with a **different simulator**, DEVSIM (finite volumes, same geometry and physics, own heat solver, mesh-converged) |
+#
+# The full dataset was *not* recomputed on the fine mesh: that would take about 20 h more compute time. This
+# is a typical situation – the dataset you have is not the dataset you would like to have.
+
+# %%
+mesh = pd.read_csv(f"{DATA}/bjt_thermal_mesh_study.csv")
+fine = pd.read_csv(f"{DATA}/bjt_thermal_gummel_finemesh.csv")
+dev = pd.read_csv(f"{DATA}/bjt_thermal_devsim.csv")
+print(f"fine mesh: {fine.sample_id.nunique()} samples, DEVSIM: {dev.sample_id.nunique()} samples, "
+      f"both: {len(set(fine.sample_id) & set(dev.sample_id))}")
+
+fig, axes = plt.subplots(1, 2, figsize=(13, 4.2))
+ref = mesh[mesh.mesh == "devsim"].set_index(["sweep", "VB_V"])
+labels = {"library": "library (12k)", "library_ratio10": "weaker grading (12k)",
+          "lateral80": "2× lateral (24k)", "depth200": "2× depth (24k)", "uniform_x2": "uniform 2× (48k)",
+          "depth400": "4× depth (48k) = fine mesh", "uniform_x4": "uniform 4× (192k)"}
+for m, lab in labels.items():
+    d = mesh[(mesh.mesh == m) & (mesh.sweep == "isothermal") & (mesh.VB_V >= 0.8)]
+    err = d.IC_A.values / ref.loc[[("isothermal", v) for v in d.VB_V], "IC_A"].values - 1
+    axes[0].plot(d.VB_V, 100 * err, "o-", ms=4, label=lab)
+axes[0].axhline(0, color="k", lw=1)
+axes[0].set(xlabel="$V_B$ (V)", ylabel="$I_C$ COMSOL / DEVSIM − 1 (%)",
+            title="Library device, isothermal: error of each mesh")
+axes[0].legend(fontsize=7)
+
+# convergence of I_C(1.1 V) with the number of elements, for two ways of refining the mesh
+for sw, marker in [("isothermal", "o"), ("selfheating", "s")]:
+    for family, color, name in [(["library", "depth200", "depth400"], "tab:blue", "depth only"),
+                                (["library", "uniform_x2", "uniform_x4"], "tab:orange", "uniform")]:
+        d = mesh[mesh.mesh.isin(family) & (mesh.sweep == sw) & np.isclose(mesh.VB_V, 1.1)].sort_values("elements")
+        axes[1].plot(d.elements, 1e3 * d.IC_A, marker + "-", color=color,
+                     mfc="none" if sw == "isothermal" else color, label=f"{name} refinement, {sw}")
+    axes[1].axhline(1e3 * ref.loc[(sw, 1.1), "IC_A"], color="k", ls="--" if sw == "isothermal" else "-",
+                    lw=1, label=f"DEVSIM, {sw}")
+axes[1].set(xscale="log", xlabel="number of mesh elements", ylabel="$I_C$ at $V_B$ = 1.1 V (mA)",
+            title="Mesh convergence, library device")
+axes[1].legend(fontsize=7)
+fig.tight_layout()
+
+# %% [markdown]
+# Refining the mesh **lowers** $I_C$ at high current and moves COMSOL towards DEVSIM. The depth direction
+# (where the current flows from the emitter through the thin base into the collector) matters, the lateral
+# direction does not. At low current ($V_B \le 0.85$ V) all meshes agree within about 1 %.
+#
+# Now the dataset samples: how far are the library-mesh data from the fine-mesh data and from DEVSIM, and
+# how does that compare with the error of the network (model F), which was trained on the library-mesh data?
+
+# %%
+key = ["sample_id", "sweep", "VB_V"]
+cmp = (gum.merge(fine[key + ["IC_A", "IB_A", "Tmax_K"]], on=key, suffixes=("", "_fine"))
+          .merge(dev[key + ["IC_A", "IB_A", "Tmax_K"]].rename(columns=lambda c: c if c in key else c + "_dev"),
+                 on=key, how="left"))
+cmp["IC_net"] = model_F.predict(cmp).IC_A.values
+fig, axes = plt.subplots(1, 3, figsize=(15, 4.2))
+for ax, sw in zip(axes[:2], ["isothermal", "selfheating"]):
+    d = cmp[cmp.sweep == sw]
+    ax.plot(d.VB_V + 0.006, 100 * (d.IC_A / d.IC_A_fine - 1), ".", color="tab:red", alpha=0.4,
+            label="library mesh vs fine mesh (70 samples)")
+    dd = d.dropna(subset=["IC_A_dev"])
+    ax.plot(dd.VB_V - 0.006, 100 * (dd.IC_A / dd.IC_A_dev - 1), "o", ms=4, mfc="none", color="tab:red",
+            label="library mesh vs DEVSIM")
+    ax.plot(dd.VB_V, 100 * (dd.IC_A_fine / dd.IC_A_dev - 1), "s", ms=4, mfc="none", color="tab:blue",
+            label="fine mesh vs DEVSIM")
+    ax.plot(d.VB_V + 0.012, 100 * (d.IC_net / d.IC_A - 1), "x", ms=4, color="tab:green", alpha=0.5,
+            label="network vs library-mesh data")
+    ax.axhline(0, color="k", lw=1)
+    ax.set(xlabel="$V_B$ (V)", ylabel="relative difference of $I_C$ (%)", title=f"$I_C$, {sw}",
+           xlim=(0.48, 1.13))
+    ax.legend(fontsize=7)
+d = cmp[(cmp.sweep == "selfheating") & (cmp.VB_V >= 0.9)].dropna(subset=["Tmax_K_dev"])
+for col, marker, color, lab in [("Tmax_K", "o", "tab:red", "library mesh"),
+                                ("Tmax_K_fine", "s", "tab:blue", "fine mesh")]:
+    axes[2].plot(d.Tmax_K_dev - d.T0_K, d[col] - d.T0_K, marker, ms=4, mfc="none", color=color, label=lab)
+lim = [0, (d.Tmax_K - d.T0_K).max() * 1.05]
+axes[2].plot(lim, lim, "k--", lw=1)
+axes[2].set(xlabel="DEVSIM $T_{max} - T_0$ (K)", ylabel="COMSOL $T_{max} - T_0$ (K)",
+            title="Temperature rise, $V_B \\geq$ 0.9 V")
+axes[2].legend(fontsize=8)
+fig.tight_layout()
+
+rows = {}
+for vb in [0.8, 0.9, 1.0, 1.1]:
+    d = cmp[np.isclose(cmp.VB_V, vb) & (cmp.sweep == "isothermal")]
+    dd = d.dropna(subset=["IC_A_dev"])
+    rows[f"V_B = {vb} V"] = {
+        "network vs data": np.median(np.abs(d.IC_net / d.IC_A - 1)),
+        "library vs fine mesh": np.median(np.abs(d.IC_A / d.IC_A_fine - 1)),
+        "library mesh vs DEVSIM": np.median(np.abs(dd.IC_A / dd.IC_A_dev - 1)),
+        "fine mesh vs DEVSIM": np.median(np.abs(dd.IC_A_fine / dd.IC_A_dev - 1))}
+print("median |relative difference| of I_C, isothermal sweep")
+pd.DataFrame(rows).T.style.format("{:.1%}")
+
+# %% [markdown]
+# **Things to notice:**
+# * Up to $V_B \approx 0.85$ V all three sources agree within 1–2 %: there the dataset is good, and the
+#   network error is the dominant error.
+# * At high current the **data error** (library mesh vs fine mesh or DEVSIM: typically 10–20 %, up to ~50 %)
+#   is several times larger than the **network error**. Improving the network further would only reproduce
+#   the discretization error more faithfully. Samples at low temperature are the worst.
+# * The error is *systematic* (always too much $I_C$) and *smooth*: the data look perfectly fine, are
+#   monotonic and satisfy $I_E+I_B+I_C=0$. No check of the dataset alone would reveal it – only a
+#   convergence study or an independent simulator does.
+# * The fine mesh agrees with DEVSIM to a few percent in the isothermal sweep; with self-heating a few
+#   percent more remain. The self-heating *gain* $I_C^{sh}/I_C^{iso}$ is about the same on both COMSOL meshes
+#   but a bit smaller in DEVSIM – the two simulators differ slightly in the electrothermal model.
+
+# %% [markdown]
 # ## 7 A neural network for the output characteristics
 #
 # ### 7.1 The data
@@ -848,3 +968,9 @@ print(f"COMSOL time for all output-characteristic samples: {out_samples.runtime_
 #    plausible? What would really happen to the transistor?
 # 6. Train model F of Section 6 only on the isothermal data and evaluate it with the flag set to 1. What does
 #    the network predict for the self-heating case, and why?
+# 7. Section 6.4: train model F only on the 70 fine-mesh samples, and once more on the same 70 samples from
+#    the library-mesh data. Compare both with DEVSIM. Is a small accurate dataset better than a large
+#    inaccurate one? How could you combine the two? (Hint: learn the *correction* fine/library.)
+# 8. Estimate the mesh-converged $I_C$ at $V_B$ = 1.1 V by Richardson extrapolation of the depth refinement
+#    (12k, 24k, 48k elements) in `bjt_thermal_mesh_study.csv`. What order of convergence do you get, and how
+#    close is the result to DEVSIM?

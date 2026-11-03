@@ -32,6 +32,8 @@ licensed under the COMSOL Software License Agreement and are **not** included in
 | `bjt_thermal/bjt_thermal_samples.csv` | 400 | 395 `ok`, 5 `partial` (see below) |
 | `bjt_thermal/bjt_thermal_gummel_finemesh.csv` | 1 540 | samples `b0001`–`b0070` of the Gummel data recomputed on a 4× finer mesh (more accurate at high current, see below) |
 | `bjt_thermal/bjt_thermal_finemesh_samples.csv` | 70 | 70 `ok` |
+| `bjt_thermal/bjt_thermal_devsim.csv` | 450 | 23 samples of the Gummel data recomputed with DEVSIM (V_B ≥ 0.5 V), the reference for the accuracy check |
+| `bjt_thermal/bjt_thermal_mesh_study.csv` | 174 | library device on 8 COMSOL meshes + DEVSIM, V_B ≥ 0.5 V |
 | `bjt_thermal/bjt_thermal_output.csv` | 22 643 | 397 samples × 3 base currents × 10 collector voltages × 2 (isothermal, self-heating), 1 177 missing |
 | `bjt_thermal/bjt_thermal_output_samples.csv` | 400 | 337 `ok`, 60 `partial`, 3 `failed` (see below) |
 
@@ -81,7 +83,10 @@ Known gaps:
   transistor is the self-heating case study.
 * **v8:** bipolar transistor: mesh study at high current and a fine-mesh subset
   (`bjt_thermal_gummel_finemesh.csv`, the first 70 Gummel samples on a 48 000-element mesh). With the
-  fine mesh COMSOL agrees with DEVSIM to a few % up to V_B = 1.1 V. Existing files unchanged.
+  fine mesh COMSOL agrees with DEVSIM to a few % up to V_B = 1.1 V. The fine-mesh file is **deliberately
+  incomplete** (the full rerun would take ~20 h more): together with `bjt_thermal_devsim.csv` and
+  `bjt_thermal_mesh_study.csv` it shows where the main dataset is inaccurate (notebook `03_bjt_thermal`,
+  Section 6.4). The DEVSIM model is in `devsim/`. Existing files unchanged.
 
 ## Files
 
@@ -103,9 +108,12 @@ data/
     bjt_thermal_samples.csv     one row per sample: status, number of points, runtime
     bjt_thermal_gummel_finemesh.csv  the first 70 Gummel samples on a finer mesh (same columns)
     bjt_thermal_finemesh_samples.csv one row per fine-mesh sample
+    bjt_thermal_devsim.csv      DEVSIM (independent simulator) Gummel data of 23 samples
+    bjt_thermal_mesh_study.csv  library device on 8 meshes and DEVSIM
     bjt_thermal_output.csv      output characteristics I_C(V_C) at fixed base current, isothermal and self-heating
     bjt_thermal_output_samples.csv  one row per sample of the output characteristics
 scripts/                        generators, job queue, parser (see "Regenerating the data")
+devsim/                         DEVSIM model of the bipolar transistor with self-heating (reference data)
 logs/comsol_job_logs.tar.gz     raw COMSOL job logs + Latin hypercube samples of this run (progress, memory, clock-time and machine lines removed; run directory shown as `<RUN>`; `runner.log` times relative to the start)
 ```
 
@@ -266,8 +274,19 @@ I_C(self-heating)/I_C(isothermal) is the same on both COMSOL meshes (1.14 at 1.1
 smaller in DEVSIM (≈ 1.09) – a remaining model difference that was not resolved. Sample `b0013`, which
 has no self-heating points in the main data, converged on the fine mesh.
 
+`bjt_thermal_devsim.csv` holds the DEVSIM results (columns as the Gummel file without `IE_A`;
+samples `b0001`, `b0002`, `b0006`, `b0008`, … – 16 of them also in the fine-mesh file, 7 chosen at the
+extremes of the parameter space). `bjt_thermal_mesh_study.csv` holds the library device on the meshes
+`library` (12k elements), `library_ratio10` (weaker depth grading, 12k), `lateral80` (2× lateral, 24k),
+`depth200` (24k), `depth200_ratio20` (24k, weaker grading), `depth400` (= the fine mesh, 48k),
+`uniform_x2` (48k), `uniform_x4` (192k), and `devsim`; columns `mesh, elements, sweep, VB_V, IE_A, IB_A,
+IC_A, Tmax_K`. DEVSIM code: `devsim/devsim_bjt.py` (isothermal), `devsim/devsim_bjt_thermal.py`
+(self-heating: own finite-volume heat solver, fixed-point coupling), `devsim/devsim_gummel.py` (driver,
+~40 min per sample on one core).
+
 For training a surrogate this hardly matters (the main data are smooth and consistent); for device
-physics, or to see how the discretization affects a model, compare the two files. In the output
+physics, or to see how the discretization affects a model, compare the files. The comparison is a
+teaching example of training data that look perfect but are systematically wrong at high current. In the output
 characteristics (library mesh only) DEVSIM gives 7–15 % less I_C at the same base current (checked for
 `b0001`).
 
