@@ -1,9 +1,9 @@
 # ppsr-ai-svs
-Training DNN to model semiconductor devices.
+Training DNN to model semiconductor and magnetic devices.
 
 Teaching materials of the project *AI ve výuce – Elektrotechnologie* (Czech Technical University in
 Prague, Faculty of Electrical Engineering). Students train deep neural networks as fast surrogate
-models of semiconductor device simulations and compare them with COMSOL Multiphysics' built-in DNN
+models of semiconductor and magnetic device simulations and compare them with COMSOL Multiphysics' built-in DNN
 surrogates.
 
 ## Case studies
@@ -14,6 +14,7 @@ surrogates.
 | 2 | Silicon solar cell (1D) | COMSOL dataset | J–V curves and Jsc, Voc, FF, efficiency from cell design and operating conditions |
 | 3 | MOSFET (2D) | COMSOL dataset | Id(Vg, Vd) of one device (tier 1) and of many device designs (tier 2) |
 | 4 | Bipolar transistor with self-heating (2D) | COMSOL dataset | Gummel plots and output characteristics, isothermal and self-heating, from design, ambient temperature and cooling |
+| 5 | Permanent-magnet generator (2D) | COMSOL dataset | EMF and losses (hysteresis, eddy, excess, magnets) from the permeability, conductivity and lamination thickness of the iron |
 
 ## Repository layout
 
@@ -40,6 +41,7 @@ base = "https://raw.githubusercontent.com/zemenja1/ppsr-ai-svs/main/comsol_datas
 diode = pd.read_csv(f"{base}/pn_diode/pn_diode_iv.csv")
 solar = pd.read_csv(f"{base}/solar_cell/solar_cell_summary.csv")
 mosfet = pd.read_csv(f"{base}/mosfet/mosfet_tier2.csv")
+generator = pd.read_csv(f"{base}/generator_2d/generator_losses.csv")
 ```
 
 ## License

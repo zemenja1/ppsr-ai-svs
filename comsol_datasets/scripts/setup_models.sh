@@ -14,4 +14,7 @@ cp "$LIB/Photonic_Devices_and_Sensors/si_solar_cell_1d.mph" "$RUN/models/si_sola
 # (~56 MB) and point BJT_SOLVED to that file.
 BJT_SOLVED="${BJT_SOLVED:-$HERE/../../../Comsol_models/bipolar_transistor_thermal.mph}"
 [ -f "$BJT_SOLVED" ] && cp "$BJT_SOLVED" "$RUN/models/bjt_thermal_lib.mph" || echo "skipped bjt_thermal_lib.mph (set BJT_SOLVED)"
+# Generator (AC/DC Module) for the permanent-magnet generator dataset
+ACDC="${ACDC:-C:/Program Files/COMSOL/COMSOL63/Multiphysics/applications/ACDC_Module}"
+cp "$ACDC/Devices,_Motors_and_Generators/generator_2d.mph" "$RUN/models/generator_2d.mph"
 ls -l "$RUN/models"

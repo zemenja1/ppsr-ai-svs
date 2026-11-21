@@ -1,7 +1,7 @@
-# COMSOL semiconductor datasets for DNN training
+# COMSOL datasets for DNN training
 
 Training data for the teaching project *AI ve výuce – Elektrotechnologie* (CTU FEL).
-All data were generated with **COMSOL Multiphysics 6.3 + Semiconductor Module** in batch mode,
+All data were generated with **COMSOL Multiphysics 6.3** (Semiconductor Module, AC/DC Module) in batch mode,
 starting from models of the COMSOL Application Library. The CSV files are meant to be put on
 GitHub and loaded directly into Google Colab.
 
@@ -11,8 +11,9 @@ GitHub and loaded directly into Google Colab.
 | 2. Silicon solar cell (1D) | `si_solar_cell_1d` | base/emitter doping, emitter depth, thickness, lifetime, irradiance, temperature, voltage V | current density J (+ Jsc, Voc, FF, η per cell) |
 | 3. MOSFET (2D) | `mosfet` | Vg, Vd (tier 1); + NA, tox, Lg, junction depth, temperature (tier 2) | drain current Id |
 | 4. Bipolar transistor with self-heating (2D) | `bipolar_transistor_thermal` | ambient temperature, thermal resistance (cooling), base and epi doping; base voltage and collector voltage (Gummel) or base current and collector voltage (output characteristics) | emitter/base/collector currents, V_BE, maximum temperature |
+| 5. Permanent-magnet generator (2D) | `generator_2d` (AC/DC Module) | permeability scaling of the iron B(H) curve, iron conductivity, lamination thickness | EMF, losses in stator, rotor, magnets; iron loss split into hysteresis, classical eddy and excess loss |
 
-The models are from the COMSOL Application Library (Semiconductor Module). The `.mph` files are
+The models are from the COMSOL Application Library (Semiconductor Module, AC/DC Module). The `.mph` files are
 licensed under the COMSOL Software License Agreement and are **not** included in this repository;
 `scripts/setup_models.sh` copies them from your own COMSOL installation.
 
@@ -112,6 +113,10 @@ data/
     bjt_thermal_mesh_study.csv  library device on 8 meshes and DEVSIM
     bjt_thermal_output.csv      output characteristics I_C(V_C) at fixed base current, isothermal and self-heating
     bjt_thermal_output_samples.csv  one row per sample of the output characteristics
+  generator_2d/
+    generator_losses.csv        losses per (kmu, conductivity, lamination thickness)
+    generator_field_cases.csv   one row per permeability scaling kmu: flux density, EMF
+    generator_emf.csv           EMF waveforms
 scripts/                        generators, job queue, parser (see "Regenerating the data")
 devsim/                         DEVSIM model of the bipolar transistor with self-heating (reference data)
 logs/comsol_job_logs.tar.gz     raw COMSOL job logs + Latin hypercube samples of this run (progress, memory, clock-time and machine lines removed; run directory shown as `<RUN>`; `runner.log` times relative to the start)
@@ -331,6 +336,48 @@ Checks done on the data:
 A sweep that fails at its first step leaves a single meaningless point in the log (I_E = I_C = 0 or
 NaN); the parser drops these.
 
+### Permanent-magnet generator (2D, AC/DC Module)
+Base model: *Generator in 2D* (Application Library `ACDC_Module/Devices,_Motors_and_Generators/generator_2d`):
+8-pole rotor with surface-mounted N50 Nd-Fe-B magnets, slotted stator with 100-turn coils, length 0.4 m,
+60 rpm (4 Hz electrical), one electrical period (0–0.25 s, 51 time steps), nonlinear B(H) curve of the
+iron, conducting magnets (eddy currents in the magnets are part of the field solution). The iron losses
+are computed after the field solution with the Bertotti model of the library model (hysteresis
+k_h = 1000, β = 1.5; classical eddy loss from conductivity σ and lamination thickness d; excess loss
+V0 = 0.5, S = 1e-3 m²) and averaged over the period (study *Time to Frequency Losses*, 6 harmonics).
+
+Two properties of the iron (stator, rotor yoke and shaft together) are varied:
+* **Permeability:** the B(H) curve is scaled along the H axis, B_new(H) = B(kmu·H), so that the initial
+  permeability changes by the factor `kmu` while the saturation (≈ 2 T) stays. 21 values, kmu = 1 and
+  0.01–3 log spaced. `mur_stator_mean` is the resulting relative permeability B/(µ0H) of the stator iron,
+  averaged over the area and the period (≈ 1160 for the original curve).
+* **Conductivity and lamination:** σ = 0, 1, 2, 3, 5, 7.5, 10, 12.5 MS/m and d = 0.1, 0.2, 0.35, 0.5, 1 mm
+  (σ = 0 only with d = 0.35 mm, where d has no effect). As in the library model, the laminated iron has
+  zero conductivity in the field solution, so σ and d change only the losses, not the field or the EMF.
+
+| File | Rows | Contents |
+|---|---|---|
+| `generator_2d/generator_losses.csv` | 756 | 21 kmu × 36 (σ, d): EMF peak; losses in stator, rotor yoke, shaft, magnets; iron loss split into hysteresis, classical eddy and excess loss |
+| `generator_2d/generator_field_cases.csv` | 21 | one row per kmu: mean µr, peak and mean B in the stator, peak B in the rotor yoke, EMF peak and RMS, solve time |
+| `generator_2d/generator_emf.csv` | 1 071 | 21 kmu × 51 time steps: induced coil voltage |
+| `generator_2d/generator_yoke_losses.png` | – | overview figure |
+
+The loss split is exact: a run with σ = 0 gives the hysteresis loss, a run with d = 1e-6 mm adds the
+excess loss (which does not depend on d), the rest is the classical eddy loss.
+
+What the data show:
+* reference (kmu = 1, σ = 10 MS/m, d = 0.35 mm): EMF peak 767 V, iron loss 443 W (hysteresis 309 W,
+  excess 133 W, classical 2.5 W), magnets 54 W;
+* at 4 Hz the conductivity acts almost only through the **excess loss** (∝ √σ): the iron loss grows from
+  309 W (σ = 0) to 459 W (σ = 12.5 MS/m). The classical eddy loss (∝ σ d² f²) stays below 7 W for
+  d ≤ 0.5 mm and reaches 25 W at d = 1 mm;
+* a lower permeability lowers the flux: EMF peak 406 V and iron loss 182 W at µr ≈ 12. Above µr ≈ 500 the
+  air gap and the magnets dominate the magnetic circuit and EMF and losses change by less than 4 %.
+  Lower losses at low µr therefore come with a weaker machine; compare e.g. loss per EMF².
+
+Limits: one speed (the classical eddy loss would grow with f², i.e. by ~2500× at 3000 rpm), all iron
+parts change together, no hysteresis in the field solution (losses are post-processed), 2D without end
+effects.
+
 ## Notes for training
 
 * **Currents span many orders of magnitude** (MOSFET subthreshold ~1e-13 A vs. saturation ~1e-4 A;
@@ -359,11 +406,12 @@ solar = pd.read_csv(f"{base}/solar_cell/solar_cell_summary.csv")
 bjt = pd.read_csv(f"{base}/bjt_thermal/bjt_thermal_gummel.csv")
 bjt = bjt[bjt.VB_V >= 0.5]   # V_B = 0.4 V is at the numerical noise floor
 bjt_out = pd.read_csv(f"{base}/bjt_thermal/bjt_thermal_output.csv")
+gen = pd.read_csv(f"{base}/generator_2d/generator_losses.csv")
 ```
 
 ## Regenerating the data
 
-Requires COMSOL 6.3 with the Semiconductor Module and a bash shell (Git Bash on Windows).
+Requires COMSOL 6.3 with the Semiconductor Module (AC/DC Module for the generator) and a bash shell (Git Bash on Windows).
 COMSOL batch Java code cannot write files, so each job prints its results to stdout and
 `parse_results.sh` collects them from the logs.
 
@@ -379,5 +427,8 @@ COMSOL batch Java code cannot write files, so each job prints its results to std
 2. `run_queue.sh` – runs up to 4 COMSOL batch processes in parallel (3 cores each), in job-name
    order, with a time limit per job and optional launch deadlines per job group.
 3. `parse_results.sh` – builds the CSV files in `data/` from the job logs.
+
+4. Generator: `generator/run_generator.sh` (one COMSOL batch process, about 30 min) runs the sweep and
+   writes the CSV files and the figure (`convert_generator.py`, `plot_generator.py`).
 
 Run directory (logs, queue): `comsol_runs` in your home directory (set `RUN=...` to change it).
