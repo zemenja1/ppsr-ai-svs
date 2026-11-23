@@ -12,6 +12,7 @@ GitHub and loaded directly into Google Colab.
 | 3. MOSFET (2D) | `mosfet` | Vg, Vd (tier 1); + NA, tox, Lg, junction depth, temperature (tier 2) | drain current Id |
 | 4. Bipolar transistor with self-heating (2D) | `bipolar_transistor_thermal` | ambient temperature, thermal resistance (cooling), base and epi doping; base voltage and collector voltage (Gummel) or base current and collector voltage (output characteristics) | emitter/base/collector currents, V_BE, maximum temperature |
 | 5. Permanent-magnet generator (2D) | `generator_2d` (AC/DC Module) | permeability scaling of the iron B(H) curve, iron conductivity, lamination thickness | EMF, losses in stator, rotor, magnets; iron loss split into hysteresis, classical eddy and excess loss |
+| 6. E-core transformer (3D, transient) | `ecore_transformer` (AC/DC Module) | source amplitude, frequency, load resistance | secondary voltage, primary current, core loss, load and copper power, flux density; waveforms |
 
 The models are from the COMSOL Application Library (Semiconductor Module, AC/DC Module). The `.mph` files are
 licensed under the COMSOL Software License Agreement and are **not** included in this repository;
@@ -117,6 +118,13 @@ data/
     generator_losses.csv        losses per (kmu, conductivity, lamination thickness)
     generator_field_cases.csv   one row per permeability scaling kmu: flux density, EMF
     generator_emf.csv           EMF waveforms
+  transformer_3d/
+    transformer_cases.csv       one row per run (source amplitude, frequency, load): voltages, currents, powers, B
+    transformer_waveforms.npz   one period of the primary/secondary voltage and current and of the mean |B| per run
+  magnetism/                    reference results of the magnetism notebook (iron ribbon: COMSOL; iron prisms: magnum.np)
+    ribbon_wall_width_comsol.*  relaxed domain walls for 3 anisotropies x 3 exchange constants
+    ribbon_switching_comsol.*   field held for 20 ns: rotation vs wall propagation
+    prism_loop_w<w>nm.csv, prism_snap_w40nm.npz, prism_states.csv, prism_state_*.npz   prisms of growing size
 scripts/                        generators, job queue, parser (see "Regenerating the data")
 devsim/                         DEVSIM model of the bipolar transistor with self-heating (reference data)
 logs/comsol_job_logs.tar.gz     raw COMSOL job logs + Latin hypercube samples of this run (progress, memory, clock-time and machine lines removed; run directory shown as `<RUN>`; `runner.log` times relative to the start)
@@ -378,6 +386,96 @@ Limits: one speed (the classical eddy loss would grow with f², i.e. by ~2500× 
 parts change together, no hysteresis in the field solution (losses are post-processed), 2D without end
 effects.
 
+### E-core transformer (3D, transient, AC/DC Module)
+Base model: *E-Core Transformer* (Application Library `ACDC_Module/Devices,_Motors_and_Generators/ecore_transformer`),
+case 1 of the model: two E-cores of soft iron (nonlinear B(H) curve, laminated, no eddy currents in the field
+solution), primary and secondary coil with 300 turns each on the centre leg, sinusoidal source
+v = Vac·sin(2πft) with R_p = 100 Ω in series on the primary side, load resistance R_s on the secondary side.
+The time-dependent study runs 2.5 periods from rest (time step T/40); the core loss is the Steinmetz loss of the
+library model (k_h = 1000, α = 1, β = 1.5), averaged over one period by the study *Time to Frequency Losses*.
+
+Three inputs are varied over 48 quasi-random (Sobol, seed 7) points, log-uniform: Vac = 5–100 V, f = 25–200 Hz,
+R_s = 13 Ω – 93 kΩ (`scripts/transformer/transformer_cases.json`).
+
+| File | Rows | Contents |
+|---|---|---|
+| `transformer_3d/transformer_cases.csv` | 48 | inputs; rms of the primary/secondary coil voltage and current over the last period (1.5–2.5 T); powers: load, core (cycle average), copper (coil resistances 0.557 / 0.684 Ω), source resistance; efficiency P_load/(P_load + P_core + P_copper); peak of the maximum and of the volume average of \|B\| in the core; peak of the average \|H\|; solve time |
+| `transformer_3d/transformer_waveforms.npz` | – | per run `<id>_t` (t/T, 40 points of the last period), `<id>_V1`, `_I1`, `_V2`, `_I2` (coil voltages and currents, COMSOL sign convention), `_B` (volume average of \|B\| in the core) |
+
+What the data show: the ratio V2_rms/(Vac/√2) ranges from 0.12 to 0.97 (median 0.61) – the drop across R_p
+dominates at heavy load (R_s ≈ 13–20 Ω gives V2 ≈ 0.12–0.17·Vac/√2) and grows with the magnetizing current
+(low frequency, saturation); the core loss ranges from
+0.01 to 7.5 W and the peak flux density from 0.04 to 2 T (ten runs above 1.2 T, where the core starts to
+saturate and the primary current becomes peaked). The efficiency is low (median 15 %) because R_p = 100 Ω is part
+of the library model. Each run takes 2–6 min (3.7 h in total, two batch processes with 4 cores each).
+Cross-check (notebook `04_magnetism`, step 9): a nonlinear magnetic-circuit model coupled to the two circuits
+reproduces V2, I1, P_core and P_load with median errors of 2–7 %; it overestimates the core loss of the weakly
+magnetized runs by up to ~40 % (no leakage flux, uniform B).
+
+Limits: one geometry and one material, no eddy currents in the core (laminated), losses post-processed (no
+hysteresis in the field solution), start from rest (the evaluated period 1.5–2.5 T is close to periodic: the
+mean of the secondary voltage is below 3 % of its peak in the most saturated runs).
+
+Regenerating: the library file contains no solution, and the batch class starts from the stored solutions. Open
+`ecore_transformer.mph` in the COMSOL GUI, compute all studies and save it (~250 MB); then
+`TR_MPH=<that file> python scripts/transformer/gen_transformer.py TrS scripts/transformer/transformer_cases.json`
+writes and compiles the batch class, `comsolbatch -inputfile TrS.class -np 4 -nosave > trs.out` runs it, and
+`python scripts/transformer/convert_transformer.py data/transformer_3d trs.out [more logs]` builds the files (the
+logs of several batch processes over parts of the case list can be merged).
+
+### Magnetism notebook: iron ribbon (COMSOL) and iron prisms (magnum.np)
+Reference results for `notebooks/04_magnetism.ipynb`, folder `data/magnetism/`.
+
+**Iron ribbon (COMSOL Multiphysics 6.3 with the *Micromagnetics Module* plugin of Fudan University, V2.13).**
+A ribbon of 300 × 5 × 1 nm, easy axis along the length x, no stray field (the plugin solves the LLG equation with
+exchange, uniaxial anisotropy and the applied field only), Ms = 1.71 MA/m, A = 1.96e-11 A·m and H_K = 43.7 kA/m in
+the field units of the plugin (A = 2.1e-11 J/m and K = 4.7e4 J/m³), γ = 2.21e5 m/(A·s). The ends of the ribbon are
+free surfaces (natural boundary condition ∂m/∂n = 0). The plugin itself is not part of COMSOL and not of this
+repository.
+
+| File | Contents |
+|---|---|
+| `ribbon_wall_width_comsol.csv` | 9 relaxed walls: H_K = 21.85 / 43.7 / 87.4 kA/m × A = 0.5 / 1 / 2 × 1.96e-11 A·m; theoretical and fitted wall parameter Δ (tanh fit of m_x), error of \|m\| |
+| `ribbon_wall_width_comsol.npz` | the same: `x_nm` and, per case `w<iK><iA>`, m(t, x, 3) during the relaxation (3 ns, α = 1, start with a 30 nm wide tanh wall) and `<case>_t_ns` |
+| `ribbon_switching_comsol.csv` | 75 runs with a field held constant for 20 ns (α = 1): **rotation** (uniform ribbon, m along −x tilted by 1°, H = 0.9–1.1 H_K for H_K = 30 / 43.7 / 60 kA/m), **nucleation** (the same with pinning ε = 0.4, H = 0.5–1.0 H_K) and **wall** (pinning K(x) = K0[1 − ε cos(2π(x − 150 nm)/64 nm)], 30 nm long ends with 20 K0 ("harder iron"); the wall is nucleated at the left end – left end along +x, seed along +y on 30–40 nm, iron along −x – and relaxes for 5 ns at H = 0, then the field is held for 20 ns; H = 1–17 kA/m for (H_K, ε) = (43.7, 0.4), (43.7, 0.2), (30, 0.4), (60, 0.4)). Columns: time when the field is switched on, <m_x> in the iron (30–270 nm) at that time and at the end, `switched`, switching time (from switching on the field), error of \|m\| after the first 0.5 ns |
+| `ribbon_switching_comsol.npz` | <m_x>(t) of the iron for every run (`<case>_t_ns`, `<case>_mx_iron`; the wall runs include the relaxation), and m(t, x, 3) for the reference iron (`<case>_m`, cases `e0..`, `h1.`, `n.`), `x_nm` |
+
+Results: the fitted wall parameter equals √(A/K) to 0.1 % (1 % for the widest wall, which feels the ends). The
+rotation switches between 1.02 and 1.05 H_K within 20 ns (Stoner–Wohlfarth: H_K). During the relaxation at H = 0 the
+nucleated wall settles in the first pinning site (86 nm); a field above the depinning field drives it through the
+iron until the right harder-iron end stops it. The wall depins at 2–3 kA/m for (H_K, ε) = (43.7, 0.2) and (30, 0.4),
+4–5 kA/m for (43.7, 0.4) and 7–8 kA/m for (60, 0.4), roughly ∝ ε·H_K. The nucleation runs (pinning, no wall) do not
+switch up to H_K. All 75 runs converged; after the first 0.5 ns the error of |m| is below 2e-2.
+
+**Iron prisms (magnum.np 2.2, computed on a CPU).** 1 : 1 : 4 prisms (w × w × 4w, long axis z), Ms = 1.71 MA/m,
+A = 2.1e-11 J/m, no crystal anisotropy, stray field and exchange; energy minimization (`MinimizerBB`).
+
+| File | Contents |
+|---|---|
+| `prism_loop_w<w>nm.csv` | descending branch of the loop, field 0.5° from z in steps of 10 kA/m, w = 5, 10, 20, 40, 80 nm (cells 1, 1.25, 2, 2.5, 3.3 nm); columns H, <m>, stray-field and exchange energy (J) |
+| `prism_snap_w40nm.npz` | m (nx, ny, nz, 3) of the 40 nm prism in the last field step before the switch |
+| `prism_states.csv` | energy density (J/m³) of the stray field, exchange and total after relaxing from a uniform, a two-domain and a vortex state at zero field, w = 10–100 nm (cells ≤ 2.5 nm up to 40 nm, 4 nm above), and <m> after the relaxation |
+| `prism_state_<kind>_w<w>nm.npz` | the relaxed magnetization of these states for w = 40 and 100 nm |
+
+Regenerating: COMSOL batch classes are generated by `scripts/magnetism/gen_ribbon.py` from the JSON case lists
+(`ribbon_cases_*.json`); `convert_ribbon_*.py` builds the files from the batch logs; `prism_magnumnp.py` computes
+the prism data.
+
+**STT-MRAM free layer (magnum.np 2.2, computed on a CPU).** Disc of 40 nm diameter and 1.3 nm thickness
+(CoFeB-like: Ms = 1 MA/m, A = 15 pJ/m, α = 0.01, bulk Ku = K_eff + µ0Ms²/2 with K_eff = 0.2 MJ/m³), cells of
+2.5 × 2.5 × 1.3 nm, exchange, uniaxial anisotropy, full stray field and the Slonczewski spin-transfer torque
+(P = 0.6, Λ = 1, no field-like term, reference layer p = +z). The free layer starts antiparallel (m along −z,
+tilted by 0.05 rad) and the current density J = f · J_c0 is held for 15 ns, with the macrospin critical current
+J_c0 = 2.63 MA/cm².
+
+| File | Contents |
+|---|---|
+| `stt_disc_J<f>.npz`, f = 1.5, 2.0, 3.0, 4.0 | `t` (s, every 10 ps), `m` (average magnetization of the disc, 3 components), `mz_snap` (m_z of every cell every 50 ps), `mask` (cells of the disc), `J`, `Jc0`, `dx`, `dt_snap` |
+
+Results: the disc switches (first <m_z> > 0) after 1.9 / 2.9 / 7.0 ns at f = 4 / 3 / 2 and not within 15 ns at f = 1.5
+(macrospin: 1.7 / 2.4 / 4.6 / 8.4 ns); the end of the reversal proceeds by a domain nucleated at the edge. Computed by
+`scripts/magnetism/stt_disc_magnumnp.py` (5–25 min per run).
+
 ## Notes for training
 
 * **Currents span many orders of magnitude** (MOSFET subthreshold ~1e-13 A vs. saturation ~1e-4 A;
@@ -407,6 +505,7 @@ bjt = pd.read_csv(f"{base}/bjt_thermal/bjt_thermal_gummel.csv")
 bjt = bjt[bjt.VB_V >= 0.5]   # V_B = 0.4 V is at the numerical noise floor
 bjt_out = pd.read_csv(f"{base}/bjt_thermal/bjt_thermal_output.csv")
 gen = pd.read_csv(f"{base}/generator_2d/generator_losses.csv")
+tr = pd.read_csv(f"{base}/transformer_3d/transformer_cases.csv")
 ```
 
 ## Regenerating the data
