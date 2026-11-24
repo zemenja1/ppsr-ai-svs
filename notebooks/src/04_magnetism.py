@@ -276,7 +276,9 @@ for k, ax in enumerate("xyz"):
 # itself, in the plane $y = 0$, for $\mathbf M$ along the long axis $z$.
 
 # %%
-x = np.linspace(-12e-3, 12e-3, 121); z = np.linspace(-22e-3, 22e-3, 221)
+# grid points between the faces of the prism, never on them: on a charged surface H jumps by M and the
+# point would be "half inside" (H taken from one side, M from the other gives a spurious spike of B)
+x = np.linspace(-12e-3, 12e-3, 121); z = np.arange(-21.9e-3, 22e-3, 0.2e-3)
 XX, ZZ = np.meshgrid(x, z, indexing="ij")
 H = prism_field(XX, 0 * XX, ZZ, dims, [0, 0, Ms])
 inside = (np.abs(XX) < dims[0] / 2) & (np.abs(ZZ) < dims[2] / 2)
@@ -686,6 +688,153 @@ plt.tight_layout(); plt.show()
 # In AC devices this causes the 100 Hz **hum of transformers** and additional loss; the 6.5 % Si steel and Ni-Fe
 # with ~80 % Ni have $\lambda \approx 0$. The volume effect (forced magnetostriction) compensates the thermal
 # expansion of **Invar** (Fe-36 % Ni).
+
+# %% [markdown]
+# ### Try it: anisotropy, field and the hysteresis loop
+#
+# The two pictures of this and the previous section combined: a single-domain particle with a **uniaxial**
+# anisotropy (easy axis $z$), an added **cubic** anisotropy $K_{cub}$ (cube axes along $x, y, z$) and a field $H$ at
+# the angle $\psi$ from $z$ towards $x$. In units of $K_u$ the energy density is
+# $$\frac{e(\mathbf m)}{K_u} = \sin^2\theta + \frac{K_{cub}}{K_u}\,(m_x^2m_y^2 + m_y^2m_z^2 + m_z^2m_x^2)
+#   - 2\,\frac{H}{H_K}\,\mathbf m\cdot\hat{\mathbf h},\qquad H_K = \frac{2K_u}{\mu_0M_s}.$$
+# The left panel shows this energy surface including the Zeeman term (the closest point to the centre is the
+# deepest minimum), the right panel the loop. During the sweep $+H \to -H \to +H$ the magnetization (red arrow)
+# stays in its **local** minimum until that minimum disappears – then it jumps: that is the hysteresis.
+#
+# Set the sliders and press **run field sweep** (rendering takes ~10 s, then the animation plays; the controls
+# below it replay or step it). Try:
+# * $K_{cub} = 0$, $\psi = 0°$: square loop, switching at exactly $H_K$; $\psi = 45°$: at $0.5\,H_K$; $\psi = 90°$: no
+#   hysteresis at all (section 8);
+# * $K_{cub}/K_u = +1$: the cubic term stiffens the easy axis, the switching field grows to $(1 + K_{cub}/K_u)H_K$;
+# * $K_{cub}/K_u = -0.5$: the cubic term prefers the ⟨111⟩ diagonals – watch the magnetization leave the $x$–$z$
+#   plane while it reverses.
+#
+# (If the widgets do not show, call `display(HTML(sweep_animation(1.0, 30)))` directly.)
+
+# %%
+import re, time
+import ipywidgets as widgets
+from IPython.display import display, HTML
+from matplotlib import animation
+
+H_MAX = 3.5          # sweep amplitude in units of H_K = 2K_u/(mu0 Ms); switches every case on the sliders
+
+
+def energy(m, k, h):
+    """Energy density / K_u of the unit vector(s) m: uniaxial (easy z) + k * cubic + Zeeman, h = H/H_K (vector)."""
+    mx, my, mz = m[..., 0], m[..., 1], m[..., 2]
+    return (1 - mz**2) + k * (mx**2 * my**2 + my**2 * mz**2 + mz**2 * mx**2) - 2 * (m @ h)
+
+
+def relax(m, k, h, tol=1e-12, itmax=20000):
+    """Follow the energy downhill on the unit sphere from m to the nearest local minimum (projected gradient)."""
+    eta = 0.1 / (1 + abs(k) + np.linalg.norm(h))
+    for _ in range(itmax):
+        mx, my, mz = m
+        g = np.array([2 * k * mx * (my**2 + mz**2), 2 * k * my * (mx**2 + mz**2),
+                      -2 * mz + 2 * k * mz * (mx**2 + my**2)]) - 2 * h
+        gt = g - (g @ m) * m                                 # tangential part of the gradient
+        if gt @ gt < tol:
+            break
+        m = m - eta * gt
+        m = m / np.linalg.norm(m)
+    return m
+
+
+def field_sweep(k, psi_deg, n=100, seed=1):
+    """Quasi-static sweep +H_MAX -> -H_MAX -> +H_MAX along the direction psi (from z towards x)."""
+    rng = np.random.default_rng(seed)
+    u = np.array([np.sin(np.radians(psi_deg)), 0.0, np.cos(np.radians(psi_deg))])
+    hs = np.r_[np.linspace(H_MAX, -H_MAX, n + 1), np.linspace(-H_MAX, H_MAX, n + 1)[1:]]
+    m, ms = u.copy(), []
+    for h in hs:
+        m = relax(m + 1e-4 * rng.normal(size=3), k, h * u)  # tiny noise: no balancing on an unstable maximum
+        ms.append(m)
+    return hs, np.array(ms), u
+
+
+TH, PH = np.meshgrid(np.linspace(0, np.pi, 31), np.linspace(0, 2 * np.pi, 61), indexing="ij")
+DIRS = np.stack([np.sin(TH) * np.cos(PH), np.sin(TH) * np.sin(PH), np.cos(TH)], axis=-1)
+
+
+def sweep_animation(k, psi_deg, every=3, interval=80, status=None):
+    """Matplotlib animation: energy surface (distance from the centre = 0.6 + normalized energy, as above) with
+    the magnetization (red) and the field (orange), and the hysteresis loop drawn point by point."""
+    hs, ms, u = field_sweep(k, psi_deg)
+    mpar = ms @ u                                           # magnetization component along the field
+    idx = list(range(0, len(hs), every))
+    fig = plt.figure(figsize=(11, 4.8), dpi=80)
+    gs = fig.add_gridspec(1, 2, width_ratios=[1, 1.05], left=0.0, right=0.97, top=0.88, bottom=0.12, wspace=0.1)
+    a3 = fig.add_subplot(gs[0], projection="3d")
+    a2 = fig.add_subplot(gs[1])
+    a2.set_xlim(-H_MAX * 1.05, H_MAX * 1.05); a2.set_ylim(-1.1, 1.1)
+    a2.set_xlabel("H / H_K"); a2.set_ylabel("m along H"); a2.axhline(0, color="k", lw=0.5); a2.axvline(0, color="k", lw=0.5)
+    loop, = a2.plot([], [], color=BLUE, lw=2)
+    dot, = a2.plot([], [], "o", color="#d62728", ms=8)
+    fig.suptitle(f"K_cub/K_u = {k:+.1f},  field at {psi_deg}° from the easy axis z (towards x)")
+
+    def draw(j):
+        i = idx[j]
+        h = hs[i] * u
+        e = energy(DIRS, k, h)
+        en = (e - e.min()) / (e.max() - e.min() + 1e-12)
+        R = 0.35 + en                                       # deep dimples: the minimum is the closest point
+        a3.cla(); a3.set_axis_off(); a3.set_box_aspect((1, 1, 1), zoom=1.3)
+        a3.set_xlim(-1.2, 1.2); a3.set_ylim(-1.2, 1.2); a3.set_zlim(-1.2, 1.2)
+        a3.view_init(elev=12, azim=-75)
+        a3.plot([0, 0], [0, 0], [-1.45, 1.45], color=GREY, lw=0.8, ls="--")
+        a3.plot([-1.45, 1.45], [0, 0], [0, 0], color=GREY, lw=0.8, ls="--")
+        a3.text(0, 0, 1.55, "z (easy)", color=GREY, fontsize=9, ha="center")
+        a3.text(1.6, 0, 0, "x", color=GREY, fontsize=9)
+        a3.plot_surface(R * DIRS[..., 0], R * DIRS[..., 1], R * DIRS[..., 2], facecolors=plt.cm.viridis(en),
+                        rstride=1, cstride=1, linewidth=0, alpha=0.75, shade=True)
+        m = ms[i]
+        a3.quiver(0, 0, 0, *(1.5 * m), color="#d62728", lw=3, arrow_length_ratio=0.18)
+        if abs(hs[i]) > 1e-9:
+            a3.quiver(0, 0, 0, *(1.3 * h / H_MAX), color=ORANGE, lw=2.5, arrow_length_ratio=0.2)
+        a3.text2D(0.03, 0.02, f"H = {hs[i]:+.2f} H_K\nred: m (energy minimum), orange: H", transform=a3.transAxes,
+                  fontsize=10)
+        loop.set_data(hs[:i + 1], mpar[:i + 1]); dot.set_data([hs[i]], [mpar[i]])
+        if status is not None:
+            status.value = f"rendering frame {j + 1} / {len(idx)} …"
+        return loop, dot
+
+    anim = animation.FuncAnimation(fig, draw, frames=len(idx), interval=interval, blit=False)
+    with plt.rc_context({"animation.frame_format": "jpeg", "savefig.dpi": 80}):   # JPEG frames: ~5x smaller
+        html = anim.to_jshtml(default_mode="once")
+    plt.close(fig)
+    name = re.search(r'onclick="(anim\w+)\.', html)
+    if name:                                                # start playing as soon as it is shown
+        html += (f"<script>setTimeout(function(){{ if (typeof {name.group(1)} !== 'undefined') "
+                 f"{{ {name.group(1)}.play_animation(); }} }}, 500);</script>")
+    return html
+
+
+k_slider = widgets.FloatSlider(value=0.0, min=-0.8, max=2.0, step=0.1, description="K_cub / K_u",
+                               continuous_update=False, style={"description_width": "110px"},
+                               layout=widgets.Layout(width="420px"))
+psi_slider = widgets.IntSlider(value=30, min=0, max=90, step=5, description="field angle (°)",
+                               continuous_update=False, style={"description_width": "110px"},
+                               layout=widgets.Layout(width="420px"))
+run_button = widgets.Button(description="run field sweep", button_style="primary", icon="play")
+status = widgets.Label("")
+out = widgets.Output()
+
+
+def run_sweep(_=None):
+    run_button.disabled = True
+    t0 = time.time()
+    html = sweep_animation(k_slider.value, psi_slider.value, status=status)
+    with out:
+        out.clear_output(wait=True)
+        display(HTML(html))
+    status.value = f"done in {time.time() - t0:.0f} s – use the controls below the animation to replay or step"
+    run_button.disabled = False
+
+
+run_button.on_click(run_sweep)
+display(widgets.VBox([out, widgets.HBox([widgets.VBox([k_slider, psi_slider]), widgets.VBox([run_button, status])])]))
+run_sweep()                                                 # one sweep with the default settings
 
 # %% [markdown]
 # ## 10 Shape anisotropy versus magnetocrystalline anisotropy
