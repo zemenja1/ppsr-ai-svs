@@ -697,27 +697,28 @@ plt.tight_layout(); plt.show()
 # the angle $\psi$ from $z$ towards $x$. In units of $K_u$ the energy density is
 # $$\frac{e(\mathbf m)}{K_u} = \sin^2\theta + \frac{K_{cub}}{K_u}\,(m_x^2m_y^2 + m_y^2m_z^2 + m_z^2m_x^2)
 #   - 2\,\frac{H}{H_K}\,\mathbf m\cdot\hat{\mathbf h},\qquad H_K = \frac{2K_u}{\mu_0M_s}.$$
-# The left panel shows this energy surface including the Zeeman term (the closest point to the centre is the
-# deepest minimum), the right panel the loop. During the sweep $+H \to -H \to +H$ the magnetization (red arrow)
-# stays in its **local** minimum until that minimum disappears – then it jumps: that is the hysteresis.
+# The left panel shows this energy surface including the Zeeman term (colour and distance from the centre grow with
+# the energy; the closest, blue point is the deepest minimum), the right panel the loop. During the sweep
+# $+H \to -H \to +H$ the magnetization (black arrow) stays in its **local** minimum until that minimum disappears –
+# then it jumps: that is the hysteresis.
 #
-# Set the sliders and press **run field sweep** (rendering takes ~10 s, then the animation plays; the controls
-# below it replay or step it). Try:
+# The first cell computes the sweeps for 3 × 3 combinations of $K_{cub}/K_u$ and $\psi$ (a few seconds; edit
+# `K_RATIOS` and `ANGLES` for other values). The second cell shows them: choose the combination with the sliders
+# and press **run field sweep**. The loops stay in the right panel for comparison until you press **reset loops**;
+# drag the energy surface to rotate it. Try:
 # * $K_{cub} = 0$, $\psi = 0°$: square loop, switching at exactly $H_K$; $\psi = 45°$: at $0.5\,H_K$; $\psi = 90°$: no
 #   hysteresis at all (section 8);
 # * $K_{cub}/K_u = +1$: the cubic term stiffens the easy axis, the switching field grows to $(1 + K_{cub}/K_u)H_K$;
-# * $K_{cub}/K_u = -0.5$: the cubic term prefers the ⟨111⟩ diagonals – watch the magnetization leave the $x$–$z$
-#   plane while it reverses.
-#
-# (If the widgets do not show, call `display(HTML(sweep_animation(1.0, 30)))` directly.)
+# * $K_{cub}/K_u = -0.5$: the cubic term prefers the ⟨111⟩ diagonals and lowers the switching field; at $\psi = 0°$
+#   watch the magnetization leave the $x$–$z$ plane while it reverses (rotate the view).
 
 # %%
-import re, time
-import ipywidgets as widgets
+import json, uuid
 from IPython.display import display, HTML
-from matplotlib import animation
 
-H_MAX = 3.5          # sweep amplitude in units of H_K = 2K_u/(mu0 Ms); switches every case on the sliders
+K_RATIOS = (-0.5, 0.0, 1.0)      # K_cub / K_u on the slider (any values can be put here)
+ANGLES = (0, 45, 90)             # field angles from the easy axis z towards x (degrees)
+H_MAX = 1.25 * (1 + max(0.0, max(K_RATIOS)))   # sweep amplitude in units of H_K: switches every case
 
 
 def energy(m, k, h):
@@ -753,88 +754,228 @@ def field_sweep(k, psi_deg, n=100, seed=1):
     return hs, np.array(ms), u
 
 
-TH, PH = np.meshgrid(np.linspace(0, np.pi, 31), np.linspace(0, 2 * np.pi, 61), indexing="ij")
-DIRS = np.stack([np.sin(TH) * np.cos(PH), np.sin(TH) * np.sin(PH), np.cos(TH)], axis=-1)
+# precompute all combinations (a few seconds); the browser then only draws
+combos = []
+for ik, k in enumerate(K_RATIOS):
+    for ia, psi in enumerate(ANGLES):
+        hs, ms, u = field_sweep(k, psi)
+        combos.append({"ik": ik, "ia": ia, "u": np.round(u, 6).tolist(), "m": np.round(ms, 4).tolist(),
+                       "mpar": np.round(ms @ u, 4).tolist()})
+SWEEP_DATA = {"hmax": H_MAX, "hs": np.round(hs, 4).tolist(), "k": list(K_RATIOS), "psi": list(ANGLES),
+              "combos": combos, "cmap": (np.array([plt.cm.coolwarm(x)[:3] for x in np.linspace(0, 1, 17)]) * 255)
+              .round().astype(int).tolist()}
+print(f"{len(combos)} field sweeps computed, amplitude {H_MAX:.2f} H_K")
 
 
-def sweep_animation(k, psi_deg, every=3, interval=80, status=None):
-    """Matplotlib animation: energy surface (distance from the centre = 0.6 + normalized energy, as above) with
-    the magnetization (red) and the field (orange), and the hysteresis loop drawn point by point."""
-    hs, ms, u = field_sweep(k, psi_deg)
-    mpar = ms @ u                                           # magnetization component along the field
-    idx = list(range(0, len(hs), every))
-    fig = plt.figure(figsize=(11, 4.8), dpi=80)
-    gs = fig.add_gridspec(1, 2, width_ratios=[1, 1.05], left=0.0, right=0.97, top=0.88, bottom=0.12, wspace=0.1)
-    a3 = fig.add_subplot(gs[0], projection="3d")
-    a2 = fig.add_subplot(gs[1])
-    a2.set_xlim(-H_MAX * 1.05, H_MAX * 1.05); a2.set_ylim(-1.1, 1.1)
-    a2.set_xlabel("H / H_K"); a2.set_ylabel("m along H"); a2.axhline(0, color="k", lw=0.5); a2.axvline(0, color="k", lw=0.5)
-    loop, = a2.plot([], [], color=BLUE, lw=2)
-    dot, = a2.plot([], [], "o", color="#d62728", ms=8)
-    fig.suptitle(f"K_cub/K_u = {k:+.1f},  field at {psi_deg}° from the easy axis z (towards x)")
+# %%
+# The viewer runs in the browser (JavaScript): it draws the energy surface from the same formula as energy() above
+# and replays the precomputed magnetization. Drag the left picture to rotate it.
+SWEEP_VIEWER = r"""
+<div id="sw__UID__" style="font-family: Arial, sans-serif; font-size: 14px; color: #222; max-width: 1000px">
+  <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start">
+    <canvas id="land__UID__" width="440" height="420" style="cursor: grab; background: #fff"></canvas>
+    <canvas id="loop__UID__" width="540" height="420" style="background: #fff"></canvas>
+  </div>
+  <div style="display: flex; flex-wrap: wrap; gap: 26px; align-items: center; margin: 8px 0 4px 10px">
+    <label>K<sub>cub</sub> / K<sub>u</sub>
+      <input type="range" id="k__UID__" min="0" step="1" style="width: 110px; vertical-align: middle">
+      <b id="kv__UID__" style="display: inline-block; width: 40px"></b></label>
+    <label>field angle from z
+      <input type="range" id="a__UID__" min="0" step="1" style="width: 110px; vertical-align: middle">
+      <b id="av__UID__" style="display: inline-block; width: 40px"></b></label>
+    <button id="run__UID__" style="padding: 6px 14px; background: #1f4e8c; color: #fff; border: 0;
+            border-radius: 4px; cursor: pointer">&#9654; run field sweep</button>
+    <button id="reset__UID__" style="padding: 6px 14px; background: #eee; border: 1px solid #aaa;
+            border-radius: 4px; cursor: pointer">reset loops</button>
+  </div>
+</div>
+<script>
+(function () {
+  const D = __DATA__, uid = "__UID__";
+  const $ = id => document.getElementById(id + uid);
+  const COLORS = ["#1f4e8c", "#e07b10", "#2ca02c", "#9467bd", "#d62728", "#8c564b", "#17becf", "#e377c2", "#7f7f7f"];
+  const M_COL = "#111111", H_COL = "#1a9850";
 
-    def draw(j):
-        i = idx[j]
-        h = hs[i] * u
-        e = energy(DIRS, k, h)
-        en = (e - e.min()) / (e.max() - e.min() + 1e-12)
-        R = 0.35 + en                                       # deep dimples: the minimum is the closest point
-        a3.cla(); a3.set_axis_off(); a3.set_box_aspect((1, 1, 1), zoom=1.3)
-        a3.set_xlim(-1.2, 1.2); a3.set_ylim(-1.2, 1.2); a3.set_zlim(-1.2, 1.2)
-        a3.view_init(elev=12, azim=-75)
-        a3.plot([0, 0], [0, 0], [-1.45, 1.45], color=GREY, lw=0.8, ls="--")
-        a3.plot([-1.45, 1.45], [0, 0], [0, 0], color=GREY, lw=0.8, ls="--")
-        a3.text(0, 0, 1.55, "z (easy)", color=GREY, fontsize=9, ha="center")
-        a3.text(1.6, 0, 0, "x", color=GREY, fontsize=9)
-        a3.plot_surface(R * DIRS[..., 0], R * DIRS[..., 1], R * DIRS[..., 2], facecolors=plt.cm.viridis(en),
-                        rstride=1, cstride=1, linewidth=0, alpha=0.75, shade=True)
-        m = ms[i]
-        a3.quiver(0, 0, 0, *(1.5 * m), color="#d62728", lw=3, arrow_length_ratio=0.18)
-        if abs(hs[i]) > 1e-9:
-            a3.quiver(0, 0, 0, *(1.3 * h / H_MAX), color=ORANGE, lw=2.5, arrow_length_ratio=0.2)
-        a3.text2D(0.03, 0.02, f"H = {hs[i]:+.2f} H_K\nred: m (energy minimum), orange: H", transform=a3.transAxes,
-                  fontsize=10)
-        loop.set_data(hs[:i + 1], mpar[:i + 1]); dot.set_data([hs[i]], [mpar[i]])
-        if status is not None:
-            status.value = f"rendering frame {j + 1} / {len(idx)} …"
-        return loop, dot
+  function hidpi(c) {
+    const r = window.devicePixelRatio || 1, w = c.width, h = c.height;
+    c.style.width = w + "px"; c.style.height = h + "px"; c.width = w * r; c.height = h * r;
+    c.getContext("2d").scale(r, r); return [w, h];
+  }
+  const land = $("land"), plot = $("loop");
+  const [LW, LH] = hidpi(land), [PW, PH] = hidpi(plot);
+  const lc = land.getContext("2d"), pc = plot.getContext("2d");
 
-    anim = animation.FuncAnimation(fig, draw, frames=len(idx), interval=interval, blit=False)
-    with plt.rc_context({"animation.frame_format": "jpeg", "savefig.dpi": 80}):   # JPEG frames: ~5x smaller
-        html = anim.to_jshtml(default_mode="once")
-    plt.close(fig)
-    name = re.search(r'onclick="(anim\w+)\.', html)
-    if name:                                                # start playing as soon as it is shown
-        html += (f"<script>setTimeout(function(){{ if (typeof {name.group(1)} !== 'undefined') "
-                 f"{{ {name.group(1)}.play_animation(); }} }}, 500);</script>")
-    return html
+  // unit directions of the energy surface
+  const NT = 31, NP = 61, DIRS = [];
+  for (let i = 0; i < NT; i++) for (let j = 0; j < NP; j++) {
+    const t = Math.PI * i / (NT - 1), p = 2 * Math.PI * j / (NP - 1);
+    DIRS.push([Math.sin(t) * Math.cos(p), Math.sin(t) * Math.sin(p), Math.cos(t)]);
+  }
+  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+  const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  const unit = a => { const n = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / n, a[1] / n, a[2] / n]; };
+
+  function cmap(t) {                                  // matplotlib "coolwarm", sampled in Python
+    const n = D.cmap.length - 1, x = Math.min(1, Math.max(0, t)) * n, i = Math.min(Math.floor(x), n - 1), f = x - i;
+    const a = D.cmap[i], b = D.cmap[i + 1];
+    return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];
+  }
+  function energy(m, k, h, u) {                       // the same formula as energy() in Python
+    const x = m[0], y = m[1], z = m[2];
+    return (1 - z * z) + k * (x * x * y * y + y * y * z * z + z * z * x * x) - 2 * h * dot(m, u);
+  }
+
+  let az = -75 * Math.PI / 180, el = 15 * Math.PI / 180;
+  let loops = [], timer = null, curCombo = 0, curFrame = 0;
+  const comboIndex = () => (+$("k").value) * D.psi.length + (+$("a").value);
+  const label = c => `K_cub/K_u = ${D.k[c.ik] > 0 ? "+" : ""}${D.k[c.ik]},  ψ = ${D.psi[c.ia]}°`;
+
+  function drawLand(ci, fi) {
+    const c = D.combos[ci], k = D.k[c.ik], u = c.u, h = D.hs[fi], m = c.m[fi];
+    const ca = Math.cos(az), sa = Math.sin(az), ce = Math.cos(el), se = Math.sin(el);
+    const V = [ce * ca, ce * sa, se], R = [-sa, ca, 0], U = [-se * ca, -se * sa, ce];
+    const S = LW / 2 / 2.05, cx = LW / 2, cy = LH / 2 - 2;
+    const proj = p => [cx + S * dot(p, R), cy - S * dot(p, U), dot(p, V)];
+    const L = unit([V[0] + 0.6 * U[0] - 0.4 * R[0], V[1] + 0.6 * U[1] - 0.4 * R[1], V[2] + 0.6 * U[2] - 0.4 * R[2]]);
+    let emin = Infinity, emax = -Infinity;
+    const E = DIRS.map(d => { const e = energy(d, k, h, u); emin = Math.min(emin, e); emax = Math.max(emax, e); return e; });
+    const span = emax - emin + 1e-12, EN = E.map(e => (e - emin) / span);
+    const P = DIRS.map((d, a) => { const r = 0.35 + EN[a]; return [r * d[0], r * d[1], r * d[2]]; });
+    const S2 = P.map(proj);
+    const quads = [];
+    for (let i = 0; i < NT - 1; i++) for (let j = 0; j < NP - 1; j++) {
+      const a0 = i * NP + j, a1 = a0 + NP, a2 = a1 + 1, a3 = a0 + 1;
+      let n = cross(sub(P[a2], P[a0]), sub(P[a3], P[a1]));
+      n = Math.hypot(n[0], n[1], n[2]) > 1e-9 ? unit(n) : DIRS[a0];
+      const shade = 0.6 + 0.4 * Math.max(0, dot(n, L));
+      const col = cmap((EN[a0] + EN[a1] + EN[a2] + EN[a3]) / 4).map(v => Math.round(v * shade));
+      quads.push([(S2[a0][2] + S2[a1][2] + S2[a2][2] + S2[a3][2]) / 4, [a0, a1, a2, a3], col]);
+    }
+    quads.sort((p, q) => p[0] - q[0]);
+    lc.clearRect(0, 0, LW, LH);
+    lc.save(); lc.setLineDash([4, 4]); lc.strokeStyle = "#999"; lc.lineWidth = 1;   // axes z and x
+    for (const ax of [[0, 0, 1.45], [1.45, 0, 0]]) {
+      const p = proj(ax), q = proj(ax.map(v => -v));
+      lc.beginPath(); lc.moveTo(q[0], q[1]); lc.lineTo(p[0], p[1]); lc.stroke();
+    }
+    lc.restore();
+    lc.fillStyle = "#777"; lc.font = "12px Arial";
+    let p = proj([0, 0, 1.55]); lc.fillText("z (easy)", p[0] - 20, p[1]);
+    p = proj([1.6, 0, 0]); lc.fillText("x", p[0], p[1]);
+    lc.globalAlpha = 0.9;
+    for (const [, idx, col] of quads) {
+      lc.beginPath(); lc.moveTo(S2[idx[0]][0], S2[idx[0]][1]);
+      for (let q = 1; q < 4; q++) lc.lineTo(S2[idx[q]][0], S2[idx[q]][1]);
+      lc.closePath(); const s = `rgb(${col[0]},${col[1]},${col[2]})`;
+      lc.fillStyle = s; lc.strokeStyle = s; lc.lineWidth = 0.6; lc.fill(); lc.stroke();
+    }
+    lc.globalAlpha = 1;
+    function arrow(vec, colr, w) {
+      const a = proj([0, 0, 0]), b = proj(vec), dx = b[0] - a[0], dy = b[1] - a[1], len = Math.hypot(dx, dy);
+      if (len < 2) return;
+      const ux = dx / len, uy = dy / len, hl = 14, hw = 6;
+      lc.strokeStyle = colr; lc.fillStyle = colr; lc.lineWidth = w; lc.lineCap = "round";
+      lc.beginPath(); lc.moveTo(a[0], a[1]); lc.lineTo(b[0] - ux * hl * 0.8, b[1] - uy * hl * 0.8); lc.stroke();
+      lc.beginPath(); lc.moveTo(b[0], b[1]);
+      lc.lineTo(b[0] - ux * hl - uy * hw, b[1] - uy * hl + ux * hw);
+      lc.lineTo(b[0] - ux * hl + uy * hw, b[1] - uy * hl - ux * hw); lc.closePath(); lc.fill();
+    }
+    arrow(m.map(v => 1.45 * v), M_COL, 5);
+    if (Math.abs(h) > 1e-9) arrow(u.map(v => 1.85 * v * h / D.hmax), H_COL, 2.5);
+    lc.font = "13px Arial"; lc.fillStyle = "#222";
+    lc.fillText(label(c), 10, 18);
+    lc.font = "bold 14px Arial"; lc.fillText(`H = ${h >= 0 ? "+" : ""}${h.toFixed(2)} H_K`, 10, 38); lc.font = "13px Arial";
+    lc.fillStyle = M_COL; lc.fillText("— M (energy minimum)", 10, LH - 12);
+    lc.fillStyle = H_COL; lc.fillText("— H", 175, LH - 12);
+    lc.fillStyle = "#555"; lc.fillText("colour: energy (blue low, red high)", 225, LH - 12);
+  }
+
+  const X0 = 62, X1 = PW - 15, Y0 = 15, Y1 = PH - 48;
+  const sx = h => X0 + (h + D.hmax) / (2 * D.hmax) * (X1 - X0);
+  const sy = v => Y1 - (v + 1.1) / 2.2 * (Y1 - Y0);
+  function drawLoops() {
+    pc.clearRect(0, 0, PW, PH);
+    pc.font = "12px Arial"; pc.strokeStyle = "#e4e4e4"; pc.lineWidth = 1; pc.fillStyle = "#333";
+    const step = D.hmax > 2.2 ? 1 : 0.5;
+    for (let h = -Math.floor(D.hmax / step) * step; h <= D.hmax + 1e-9; h += step) {
+      pc.beginPath(); pc.moveTo(sx(h), Y0); pc.lineTo(sx(h), Y1); pc.stroke();
+      pc.fillText(h.toFixed(step < 1 ? 1 : 0), sx(h) - 8, Y1 + 16);
+    }
+    for (const v of [-1, -0.5, 0, 0.5, 1]) {
+      pc.beginPath(); pc.moveTo(X0, sy(v)); pc.lineTo(X1, sy(v)); pc.stroke();
+      pc.fillText(v.toFixed(1), X0 - 32, sy(v) + 4);
+    }
+    pc.strokeStyle = "#666"; pc.beginPath(); pc.moveTo(sx(0), Y0); pc.lineTo(sx(0), Y1);
+    pc.moveTo(X0, sy(0)); pc.lineTo(X1, sy(0)); pc.stroke();
+    pc.strokeStyle = "#333"; pc.strokeRect(X0, Y0, X1 - X0, Y1 - Y0);
+    pc.fillText("H / H_K", (X0 + X1) / 2 - 20, PH - 12);
+    pc.save(); pc.translate(16, (Y0 + Y1) / 2 + 45); pc.rotate(-Math.PI / 2); pc.fillText("M along H  (M / M_s)", 0, 0);
+    pc.restore();
+    loops.forEach(L => {
+      const c = D.combos[L.ci];
+      pc.strokeStyle = L.color; pc.lineWidth = 2.2; pc.beginPath();
+      for (let i = 0; i < L.n; i++) { const X = sx(D.hs[i]), Y = sy(c.mpar[i]); i ? pc.lineTo(X, Y) : pc.moveTo(X, Y); }
+      pc.stroke();
+    });
+    loops.forEach((L, n) => {                          // legend on top of all curves
+      const c = D.combos[L.ci];
+      pc.fillStyle = "rgba(255,255,255,0.85)"; pc.fillRect(X0 + 6, Y0 + 6 + 18 * n, 190, 18);
+      pc.fillStyle = L.color; pc.fillRect(X0 + 10, Y0 + 14 + 18 * n, 18, 3);
+      pc.fillStyle = "#222"; pc.fillText(label(c), X0 + 34, Y0 + 19 + 18 * n);
+    });
+    if (timer && loops.length) {                       // current state
+      const L = loops[loops.length - 1], c = D.combos[L.ci], i = L.n - 1;
+      pc.fillStyle = L.color; pc.strokeStyle = "#000"; pc.lineWidth = 1.5;
+      pc.beginPath(); pc.arc(sx(D.hs[i]), sy(c.mpar[i]), 6, 0, 2 * Math.PI); pc.fill(); pc.stroke();
+    }
+  }
+
+  function showSettings() {
+    $("kv").textContent = (D.k[+$("k").value] > 0 ? "+" : "") + D.k[+$("k").value];
+    $("av").textContent = D.psi[+$("a").value] + "°";
+    if (!timer) { curCombo = comboIndex(); curFrame = 0; drawLand(curCombo, 0); }
+  }
+  $("k").max = D.k.length - 1; $("k").value = D.k.indexOf(0) >= 0 ? D.k.indexOf(0) : 0;
+  $("a").max = D.psi.length - 1; $("a").value = 0;
+  $("k").oninput = showSettings; $("a").oninput = showSettings;
+
+  function busy(on) { $("run").disabled = on; $("run").style.opacity = on ? 0.45 : 1; }
+  $("run").onclick = () => {
+    if (timer) return;
+    const ci = comboIndex(), L = { ci: ci, n: 1, color: COLORS[loops.length % COLORS.length] };
+    loops.push(L); curCombo = ci; busy(true);
+    timer = setInterval(() => {
+      if (L.n >= D.hs.length) { clearInterval(timer); timer = null; busy(false); drawLoops(); return; }
+      L.n += 1; curFrame = L.n - 1; drawLand(ci, curFrame); drawLoops();
+    }, 30);
+  };
+  $("reset").onclick = () => {
+    if (timer) { clearInterval(timer); timer = null; busy(false); }
+    loops = []; drawLoops(); showSettings();
+  };
+
+  let drag = null;                                    // rotate the energy surface with the mouse
+  land.onmousedown = e => { drag = [e.clientX, e.clientY]; land.style.cursor = "grabbing"; };
+  window.addEventListener("mouseup", () => { drag = null; land.style.cursor = "grab"; });
+  window.addEventListener("mousemove", e => {
+    if (!drag) return;
+    az -= (e.clientX - drag[0]) * 0.01; el = Math.max(-1.4, Math.min(1.4, el + (e.clientY - drag[1]) * 0.01));
+    drag = [e.clientX, e.clientY]; drawLand(curCombo, curFrame);
+  });
+  showSettings(); drawLoops();
+})();
+</script>
+"""
 
 
-k_slider = widgets.FloatSlider(value=0.0, min=-0.8, max=2.0, step=0.1, description="K_cub / K_u",
-                               continuous_update=False, style={"description_width": "110px"},
-                               layout=widgets.Layout(width="420px"))
-psi_slider = widgets.IntSlider(value=30, min=0, max=90, step=5, description="field angle (°)",
-                               continuous_update=False, style={"description_width": "110px"},
-                               layout=widgets.Layout(width="420px"))
-run_button = widgets.Button(description="run field sweep", button_style="primary", icon="play")
-status = widgets.Label("")
-out = widgets.Output()
+def show_sweep_viewer(data=None):
+    """Display the interactive viewer for the precomputed sweeps (SWEEP_DATA)."""
+    html = SWEEP_VIEWER.replace("__DATA__", json.dumps(data or SWEEP_DATA)).replace("__UID__", uuid.uuid4().hex[:8])
+    display(HTML(html))
 
 
-def run_sweep(_=None):
-    run_button.disabled = True
-    t0 = time.time()
-    html = sweep_animation(k_slider.value, psi_slider.value, status=status)
-    with out:
-        out.clear_output(wait=True)
-        display(HTML(html))
-    status.value = f"done in {time.time() - t0:.0f} s – use the controls below the animation to replay or step"
-    run_button.disabled = False
-
-
-run_button.on_click(run_sweep)
-display(widgets.VBox([out, widgets.HBox([widgets.VBox([k_slider, psi_slider]), widgets.VBox([run_button, status])])]))
-run_sweep()                                                 # one sweep with the default settings
+show_sweep_viewer()
 
 # %% [markdown]
 # ## 10 Shape anisotropy versus magnetocrystalline anisotropy
